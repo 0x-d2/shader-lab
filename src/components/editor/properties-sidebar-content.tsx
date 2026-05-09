@@ -17,6 +17,7 @@ import {
 } from "@/lib/editor/custom-shader/shared"
 import {
   cancelFluidInteractionRecording,
+  getFluidInteractionEventCount,
   startFluidInteractionRecording,
   stopFluidInteractionRecording,
 } from "@/lib/editor/fluid-interaction-recorder"
@@ -327,6 +328,7 @@ export function SelectedLayerPropertiesContent({
   const timelineIsPlaying = useTimelineStore((state) => state.isPlaying)
   const timelineLoop = useTimelineStore((state) => state.loop)
   const previousFluidRecordingTimeRef = useRef<number | null>(null)
+  const [liveRecordingCount, setLiveRecordingCount] = useState(0)
   const groupedParams = useMemo(
     () => groupVisibleParams(visibleParams),
     [visibleParams]
@@ -337,10 +339,26 @@ export function SelectedLayerPropertiesContent({
   let fluidInteractionMessage = "No recording"
 
   if (isRecordingFluidLayer) {
-    fluidInteractionMessage = "Recording"
+    fluidInteractionMessage =
+      liveRecordingCount > 0
+        ? `Recording — ${liveRecordingCount} events`
+        : "Recording — move mouse on canvas"
   } else if (fluidInteractionEventCount > 0) {
     fluidInteractionMessage = `${fluidInteractionEventCount} samples`
   }
+
+  useEffect(() => {
+    if (!isRecordingFluidLayer) {
+      setLiveRecordingCount(0)
+      return
+    }
+
+    const interval = setInterval(() => {
+      setLiveRecordingCount(getFluidInteractionEventCount())
+    }, 100)
+
+    return () => clearInterval(interval)
+  }, [isRecordingFluidLayer])
 
   const finishFluidRecording = useCallback(() => {
     const events = stopFluidInteractionRecording()
@@ -366,14 +384,10 @@ export function SelectedLayerPropertiesContent({
     }
 
     setFluidInteractionEvents(layerId, [])
-    const timeline = useTimelineStore.getState()
-    if (timeline.currentTime >= timeline.duration) {
-      setTimelineCurrentTime(0)
-    }
+    setTimelinePlaying(false)
+    setTimelineCurrentTime(0)
     startFluidInteractionRecording(layerId)
     setRecordingFluidLayer(layerId)
-    previousFluidRecordingTimeRef.current = timeline.currentTime
-    setTimelinePlaying(true)
   }, [
     finishFluidRecording,
     isRecordingFluidLayer,
@@ -420,6 +434,7 @@ export function SelectedLayerPropertiesContent({
       timelineCurrentTime >= timelineDuration - 0.001
 
     if (looped || reachedEnd) {
+      previousFluidRecordingTimeRef.current = null
       finishFluidRecording()
       return
     }
