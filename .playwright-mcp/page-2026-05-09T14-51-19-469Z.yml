@@ -1,0 +1,411 @@
+- generic [ref=e1]:
+  - main [ref=e2]:
+    - application "Canvas viewport" [ref=e3]
+    - generic [ref=e18]:
+      - generic [ref=e20]:
+        - generic [ref=e21]:
+          - button "Pause playback" [ref=e22] [cursor=pointer]:
+            - img [ref=e23]
+          - button "Stop playback" [ref=e25] [cursor=pointer]:
+            - img [ref=e26]
+          - button "Disable loop" [ref=e28] [cursor=pointer]:
+            - img [ref=e29]
+        - button "Disable auto-key" [ref=e33] [cursor=pointer]:
+          - img [ref=e34]
+          - generic [ref=e36]: Auto-Key
+        - generic [ref=e38]:
+          - generic [ref=e39]: Dur
+          - textbox "Timeline duration in seconds" [ref=e40]: "8"
+          - generic [ref=e41]: sec
+        - generic [ref=e42]:
+          - generic [ref=e43]: 1.19s / 8.00s
+          - button "Expand timeline panel" [ref=e44] [cursor=pointer]:
+            - img [ref=e45]
+      - generic:
+        - generic:
+          - generic:
+            - paragraph: Properties
+            - generic:
+              - generic:
+                - button:
+                  - generic:
+                    - generic: Opacity
+              - generic:
+                - button:
+                  - generic:
+                    - generic: Hue
+              - generic:
+                - button:
+                  - generic:
+                    - generic: Saturation
+              - generic:
+                - button:
+                  - generic:
+                    - generic: Sim Resolution
+              - generic:
+                - button:
+                  - generic:
+                    - generic: Dye Resolution
+              - generic:
+                - button:
+                  - generic:
+                    - generic: Iterations
+              - generic:
+                - button:
+                  - generic:
+                    - generic: Density Dissipation
+              - generic:
+                - button:
+                  - generic:
+                    - generic: Velocity Dissipation
+              - generic:
+                - button:
+                  - generic:
+                    - generic: Pressure Dissipation
+              - generic:
+                - button:
+                  - generic:
+                    - generic: Curl
+              - generic:
+                - button:
+                  - generic:
+                    - generic: Radius
+              - generic:
+                - button:
+                  - generic:
+                    - generic: Splat Force
+              - generic:
+                - button:
+                  - generic:
+                    - generic: Auto Splats
+              - generic:
+                - button:
+                  - generic:
+                    - generic: Brightness
+              - generic:
+                - button:
+                  - generic:
+                    - generic: Color Mode
+              - generic:
+                - button:
+                  - generic:
+                    - generic: Mono Dark
+              - generic:
+                - button:
+                  - generic:
+                    - generic: Mono Light
+        - generic:
+          - generic: "0.0"
+          - generic: "2.0"
+          - generic: "4.0"
+          - generic: "6.0"
+          - generic: "8.0"
+        - generic:
+          - paragraph: Add your first keyframe from the properties panel.
+    - generic [ref=e49]:
+      - generic [ref=e50]:
+        - button "Drag" [ref=e51]:
+          - img [ref=e52]
+        - button "Undo" [ref=e54] [cursor=pointer]:
+          - img [ref=e55]
+        - button "Redo" [disabled] [ref=e57]:
+          - img [ref=e58]
+      - generic [ref=e60]:
+        - button "Zoom out" [ref=e61] [cursor=pointer]:
+          - img [ref=e62]
+        - button "100%" [ref=e64] [cursor=pointer]:
+          - generic [ref=e65]: 100%
+        - button "Zoom in" [ref=e66] [cursor=pointer]:
+          - img [ref=e67]
+        - button "Scene settings" [ref=e70] [cursor=pointer]:
+          - img [ref=e71]
+        - button "Mute interface sounds" [ref=e73] [cursor=pointer]:
+          - img [ref=e74]
+        - button "Export" [ref=e76] [cursor=pointer]:
+          - img [ref=e77]
+        - link "Open Shader Lab on GitHub" [ref=e79] [cursor=pointer]:
+          - /url: https://github.com/basementstudio/shader-lab
+          - img [ref=e80]
+    - generic [ref=e83]:
+      - generic [ref=e84]:
+        - generic [ref=e85]:
+          - button "Move layers panel" [ref=e86]:
+            - img [ref=e87]
+          - paragraph [ref=e89]: Layers
+        - generic [ref=e90]:
+          - button "Hide UI (Cmd + .)" [ref=e91] [cursor=pointer]:
+            - img [ref=e92]
+          - button "Add layer" [ref=e95] [cursor=pointer]:
+            - img [ref=e96]
+      - list [ref=e98]:
+        - listitem [ref=e1014] [cursor=pointer]:
+          - generic [ref=e1015]:
+            - button "Reorder Fluid" [ref=e1016]:
+              - img [ref=e1017]
+            - button "Fluid" [ref=e1019]:
+              - img [ref=e1021]
+              - paragraph [ref=e1024]: Fluid
+          - combobox "Layer actions for Fluid" [ref=e1026]:
+            - img [ref=e1028]
+          - textbox [ref=e1030]
+          - button "Hide layer" [ref=e1031]:
+            - img [ref=e1032]
+          - button "Delete Fluid" [ref=e1034]:
+            - img [ref=e1035]
+        - listitem [ref=e99] [cursor=pointer]:
+          - generic [ref=e100]:
+            - button "Reorder CRT" [ref=e101]:
+              - img [ref=e102]
+            - button "CRT" [ref=e104]:
+              - img [ref=e106]
+              - paragraph [ref=e109]: CRT
+          - combobox "Layer actions for CRT" [ref=e111]:
+            - img [ref=e113]
+          - textbox [ref=e115]
+          - button "Hide layer" [ref=e116]:
+            - img [ref=e117]
+          - button "Delete CRT" [ref=e119]:
+            - img [ref=e120]
+        - listitem [ref=e122] [cursor=pointer]:
+          - generic [ref=e123]:
+            - button "Reorder Dithering" [ref=e124]:
+              - img [ref=e125]
+            - button "Dithering" [ref=e127]:
+              - img [ref=e129]
+              - paragraph [ref=e132]: Dithering
+          - combobox "Layer actions for Dithering" [ref=e134]:
+            - img [ref=e136]
+          - textbox [ref=e138]
+          - button "Hide layer" [ref=e139]:
+            - img [ref=e140]
+          - button "Delete Dithering" [ref=e142]:
+            - img [ref=e143]
+        - listitem [ref=e145] [cursor=pointer]:
+          - generic [ref=e146]:
+            - button "Reorder Text" [ref=e147]:
+              - img [ref=e148]
+            - button "Text" [ref=e150]:
+              - img [ref=e152]
+              - paragraph [ref=e155]: Text
+          - combobox "Layer actions for Text" [ref=e157]:
+            - img [ref=e159]
+          - textbox [ref=e161]
+          - button "Hide layer" [ref=e162]:
+            - img [ref=e163]
+          - button "Delete Text" [ref=e165]:
+            - img [ref=e166]
+        - listitem [ref=e168] [cursor=pointer]:
+          - generic [ref=e169]:
+            - button "Reorder Pattern" [ref=e170]:
+              - img [ref=e171]
+            - button "Pattern" [ref=e173]:
+              - img [ref=e175]
+              - paragraph [ref=e178]: Pattern
+          - combobox "Layer actions for Pattern" [ref=e180]:
+            - img [ref=e182]
+          - textbox [ref=e184]
+          - button "Hide layer" [ref=e185]:
+            - img [ref=e186]
+          - button "Delete Pattern" [ref=e188]:
+            - img [ref=e189]
+        - listitem [ref=e191] [cursor=pointer]:
+          - generic [ref=e192]:
+            - button "Reorder Gradient" [ref=e193]:
+              - img [ref=e194]
+            - button "Gradient" [ref=e196]:
+              - img [ref=e198]
+              - paragraph [ref=e211]: Gradient
+          - combobox "Layer actions for Gradient" [ref=e213]:
+            - img [ref=e215]
+          - textbox [ref=e217]
+          - button "Hide layer" [ref=e218]:
+            - img [ref=e219]
+          - button "Delete Gradient" [ref=e221]:
+            - img [ref=e222]
+    - generic [ref=e226]:
+      - generic [ref=e228]:
+        - button "Move properties panel" [ref=e229]:
+          - img [ref=e230]
+        - paragraph [ref=e232]: Properties
+      - generic [ref=e1037]:
+        - generic [ref=e1039]:
+          - paragraph [ref=e1041]: Fluid
+          - generic [ref=e1042]: Source
+        - generic [ref=e1043]:
+          - generic [ref=e1044]:
+            - paragraph [ref=e1045]: General
+            - generic [ref=e1046]:
+              - group "Opacity" [ref=e1047]:
+                - generic [ref=e1048]:
+                  - generic [ref=e1050]:
+                    - generic [ref=e1051]: Opacity
+                    - button [disabled] [ref=e1054]:
+                      - img [ref=e1055]
+                  - button "Edit slider value" [ref=e1059] [cursor=pointer]: 100%
+                - slider "Opacity" [ref=e1065]: "100"
+              - generic [ref=e1066]:
+                - paragraph [ref=e1067]: Blend
+                - combobox [ref=e1069] [cursor=pointer]:
+                  - generic [ref=e1070]: Normal
+                  - img [ref=e1072]
+                - textbox [ref=e1074]: normal
+              - generic [ref=e1075]:
+                - paragraph [ref=e1076]: Mode
+                - combobox [ref=e1078] [cursor=pointer]:
+                  - generic [ref=e1079]: Filter
+                  - img [ref=e1081]
+                - textbox [ref=e1083]: filter
+              - group "Hue" [ref=e1084]:
+                - generic [ref=e1085]:
+                  - generic [ref=e1087]:
+                    - generic [ref=e1088]: Hue
+                    - button [disabled] [ref=e1091]:
+                      - img [ref=e1092]
+                  - button "Edit slider value" [ref=e1096] [cursor=pointer]: "0"
+                - slider "Hue" [ref=e1102]: "0"
+              - group "Saturation" [ref=e1103]:
+                - generic [ref=e1104]:
+                  - generic [ref=e1106]:
+                    - generic [ref=e1107]: Saturation
+                    - button [disabled] [ref=e1110]:
+                      - img [ref=e1111]
+                  - button "Edit slider value" [ref=e1115] [cursor=pointer]: "1.00"
+                - slider "Saturation" [ref=e1121]: "1"
+          - generic [ref=e1122]:
+            - paragraph [ref=e1123]: Interaction
+            - generic [ref=e1124]:
+              - paragraph [ref=e1125]: Recording — move mouse on canvas
+              - generic [ref=e1126]:
+                - button "Stop" [active] [ref=e1400] [cursor=pointer]
+                - button "Clear" [ref=e1128] [cursor=pointer]
+          - generic [ref=e1129]:
+            - paragraph [ref=e1130]: Fluid
+            - generic [ref=e1131]:
+              - group "Sim Resolution" [ref=e1132]:
+                - generic [ref=e1133]:
+                  - paragraph [ref=e1136]:
+                    - generic [ref=e1137]:
+                      - generic [ref=e1138]: Sim Resolution
+                      - button [disabled] [ref=e1141]:
+                        - img [ref=e1142]
+                  - button "Edit slider value" [ref=e1146] [cursor=pointer]: "192"
+                - slider "Sim Resolution" [ref=e1152]: "192"
+              - group "Dye Resolution" [ref=e1153]:
+                - generic [ref=e1154]:
+                  - paragraph [ref=e1157]:
+                    - generic [ref=e1158]:
+                      - generic [ref=e1159]: Dye Resolution
+                      - button [disabled] [ref=e1162]:
+                        - img [ref=e1163]
+                  - button "Edit slider value" [ref=e1167] [cursor=pointer]: 1,024
+                - slider "Dye Resolution" [ref=e1173]: "1024"
+              - group "Iterations" [ref=e1174]:
+                - generic [ref=e1175]:
+                  - paragraph [ref=e1178]:
+                    - generic [ref=e1179]:
+                      - generic [ref=e1180]: Iterations
+                      - button [disabled] [ref=e1183]:
+                        - img [ref=e1184]
+                  - button "Edit slider value" [ref=e1188] [cursor=pointer]: "20"
+                - slider "Iterations" [ref=e1194]: "20"
+              - group "Density Dissipation" [ref=e1195]:
+                - generic [ref=e1196]:
+                  - paragraph [ref=e1199]:
+                    - generic [ref=e1200]:
+                      - generic [ref=e1201]: Density Dissipation
+                      - button [disabled] [ref=e1204]:
+                        - img [ref=e1205]
+                  - button "Edit slider value" [ref=e1209] [cursor=pointer]: "4"
+                - slider "Density Dissipation" [ref=e1215]: "4"
+              - group "Velocity Dissipation" [ref=e1216]:
+                - generic [ref=e1217]:
+                  - paragraph [ref=e1220]:
+                    - generic [ref=e1221]:
+                      - generic [ref=e1222]: Velocity Dissipation
+                      - button [disabled] [ref=e1225]:
+                        - img [ref=e1226]
+                  - button "Edit slider value" [ref=e1230] [cursor=pointer]: "0.2"
+                - slider "Velocity Dissipation" [ref=e1236]: "0.2"
+              - group "Pressure Dissipation" [ref=e1237]:
+                - generic [ref=e1238]:
+                  - paragraph [ref=e1241]:
+                    - generic [ref=e1242]:
+                      - generic [ref=e1243]: Pressure Dissipation
+                      - button [disabled] [ref=e1246]:
+                        - img [ref=e1247]
+                  - button "Edit slider value" [ref=e1251] [cursor=pointer]: "0"
+                - slider "Pressure Dissipation" [ref=e1256]: "0"
+              - group "Curl" [ref=e1257]:
+                - generic [ref=e1258]:
+                  - paragraph [ref=e1261]:
+                    - generic [ref=e1262]:
+                      - generic [ref=e1263]: Curl
+                      - button [disabled] [ref=e1266]:
+                        - img [ref=e1267]
+                  - button "Edit slider value" [ref=e1271] [cursor=pointer]: "30"
+                - slider "Curl" [ref=e1277]: "30"
+              - group "Radius" [ref=e1278]:
+                - generic [ref=e1279]:
+                  - paragraph [ref=e1282]:
+                    - generic [ref=e1283]:
+                      - generic [ref=e1284]: Radius
+                      - button [disabled] [ref=e1287]:
+                        - img [ref=e1288]
+                  - button "Edit slider value" [ref=e1292] [cursor=pointer]: "1"
+                - slider "Radius" [ref=e1298]: "1"
+              - group "Splat Force" [ref=e1299]:
+                - generic [ref=e1300]:
+                  - paragraph [ref=e1303]:
+                    - generic [ref=e1304]:
+                      - generic [ref=e1305]: Splat Force
+                      - button [disabled] [ref=e1308]:
+                        - img [ref=e1309]
+                  - button "Edit slider value" [ref=e1313] [cursor=pointer]: 6,000
+                - slider "Splat Force" [ref=e1319]: "6000"
+              - generic [ref=e1320]:
+                - paragraph [ref=e1322]:
+                  - generic [ref=e1323]:
+                    - generic [ref=e1324]: Auto Splats
+                    - button [disabled] [ref=e1327]:
+                      - img [ref=e1328]
+                - generic [ref=e1330] [cursor=pointer]:
+                  - switch [checked] [ref=e1331]
+                  - checkbox [checked] [ref=e1333]
+              - group "Brightness" [ref=e1334]:
+                - generic [ref=e1335]:
+                  - paragraph [ref=e1338]:
+                    - generic [ref=e1339]:
+                      - generic [ref=e1340]: Brightness
+                      - button [disabled] [ref=e1343]:
+                        - img [ref=e1344]
+                  - button "Edit slider value" [ref=e1348] [cursor=pointer]: "1.6"
+                - slider "Brightness" [ref=e1354]: "1.6"
+              - generic [ref=e1355]:
+                - paragraph [ref=e1357]:
+                  - generic [ref=e1358]:
+                    - generic [ref=e1359]: Color Mode
+                    - button [disabled] [ref=e1362]:
+                      - img [ref=e1363]
+                - combobox [ref=e1366] [cursor=pointer]:
+                  - generic [ref=e1367]: Monochrome
+                  - img [ref=e1369]
+                - textbox [ref=e1371]: monochrome
+              - generic [ref=e1372]:
+                - paragraph [ref=e1374]:
+                  - generic [ref=e1375]:
+                    - generic [ref=e1376]: Mono Dark
+                    - button [disabled] [ref=e1379]:
+                      - img [ref=e1380]
+                - button "#000000" [ref=e1383] [cursor=pointer]:
+                  - generic [ref=e1385]: "#000000"
+              - generic [ref=e1386]:
+                - paragraph [ref=e1388]:
+                  - generic [ref=e1389]:
+                    - generic [ref=e1390]: Mono Light
+                    - button [disabled] [ref=e1393]:
+                      - img [ref=e1394]
+                - button "#FFFFFF" [ref=e1397] [cursor=pointer]:
+                  - generic [ref=e1399]: "#FFFFFF"
+  - button "Open Next.js Dev Tools" [ref=e12] [cursor=pointer]:
+    - img [ref=e13]
+  - alert [ref=e815]

@@ -1,0 +1,627 @@
+- generic [ref=e1]:
+  - main [ref=e2]:
+    - application "Canvas viewport" [ref=e3]
+    - generic [ref=e19]:
+      - generic [ref=e21]:
+        - generic [ref=e22]:
+          - button "Pause playback" [ref=e23] [cursor=pointer]:
+            - img [ref=e24]
+          - button "Stop playback" [ref=e26] [cursor=pointer]:
+            - img [ref=e27]
+          - button "Disable loop" [ref=e29] [cursor=pointer]:
+            - img [ref=e30]
+        - button "Disable auto-key" [ref=e34] [cursor=pointer]:
+          - img [ref=e35]
+          - generic [ref=e37]: Auto-Key
+        - generic [ref=e39]:
+          - generic [ref=e40]: Dur
+          - textbox "Timeline duration in seconds" [ref=e41]: "8"
+          - generic [ref=e42]: sec
+        - generic [ref=e43]:
+          - generic [ref=e44]: 2.94s / 8.00s
+          - button "Expand timeline panel" [ref=e45] [cursor=pointer]:
+            - img [ref=e46]
+      - generic:
+        - generic:
+          - generic:
+            - paragraph: Properties
+            - generic:
+              - generic:
+                - button:
+                  - generic:
+                    - generic: Opacity
+              - generic:
+                - button:
+                  - generic:
+                    - generic: Hue
+              - generic:
+                - button:
+                  - generic:
+                    - generic: Saturation
+              - generic:
+                - button:
+                  - generic:
+                    - generic: Mode
+              - generic:
+                - button:
+                  - generic:
+                    - generic: Mask Scale
+              - generic:
+                - button:
+                  - generic:
+                    - generic: Scanline Intensity
+              - generic:
+                - button:
+                  - generic:
+                    - generic: Mask Intensity
+              - generic:
+                - button:
+                  - generic:
+                    - generic: Barrel Distortion
+              - generic:
+                - button:
+                  - generic:
+                    - generic: Convergence
+              - generic:
+                - button:
+                  - generic:
+                    - generic: Beam Focus
+              - generic:
+                - button:
+                  - generic:
+                    - generic: Brightness
+              - generic:
+                - button:
+                  - generic:
+                    - generic: Highlight Drive
+              - generic:
+                - button:
+                  - generic:
+                    - generic: Highlight Threshold
+              - generic:
+                - button:
+                  - generic:
+                    - generic: Shoulder
+              - generic:
+                - button:
+                  - generic:
+                    - generic: Chroma Retention
+              - generic:
+                - button:
+                  - generic:
+                    - generic: Shadow Lift
+              - generic:
+                - button:
+                  - generic:
+                    - generic: Persistence
+              - generic:
+                - button:
+                  - generic:
+                    - generic: Vignette
+              - generic:
+                - button:
+                  - generic:
+                    - generic: Flicker
+              - generic:
+                - button:
+                  - generic:
+                    - generic: Glitch
+              - generic:
+                - button:
+                  - generic:
+                    - generic: Glitch Speed
+              - generic:
+                - button:
+                  - generic:
+                    - generic: Bloom
+              - generic:
+                - button:
+                  - generic:
+                    - generic: Intensity
+              - generic:
+                - button:
+                  - generic:
+                    - generic: Threshold
+              - generic:
+                - button:
+                  - generic:
+                    - generic: Radius
+              - generic:
+                - button:
+                  - generic:
+                    - generic: Softness
+        - generic:
+          - generic: "0.0"
+          - generic: "2.0"
+          - generic: "4.0"
+          - generic: "6.0"
+          - generic: "8.0"
+        - generic:
+          - paragraph: Add your first keyframe from the properties panel.
+    - generic [ref=e50]:
+      - generic [ref=e51]:
+        - button "Drag" [ref=e52]:
+          - img [ref=e53]
+        - button "Undo" [ref=e55] [cursor=pointer]:
+          - img [ref=e56]
+        - button "Redo" [disabled] [ref=e58]:
+          - img [ref=e59]
+      - generic [ref=e61]:
+        - button "Zoom out" [ref=e62] [cursor=pointer]:
+          - img [ref=e63]
+        - button "100%" [ref=e65] [cursor=pointer]:
+          - generic [ref=e66]: 100%
+        - button "Zoom in" [ref=e67] [cursor=pointer]:
+          - img [ref=e68]
+        - button "Scene settings" [ref=e71] [cursor=pointer]:
+          - img [ref=e72]
+        - button "Mute interface sounds" [ref=e74] [cursor=pointer]:
+          - img [ref=e75]
+        - button "Export" [ref=e77] [cursor=pointer]:
+          - img [ref=e78]
+        - link "Open Shader Lab on GitHub" [ref=e80] [cursor=pointer]:
+          - /url: https://github.com/basementstudio/shader-lab
+          - img [ref=e81]
+    - generic [ref=e84]:
+      - generic [ref=e85]:
+        - generic [ref=e86]:
+          - button "Move layers panel" [ref=e87]:
+            - img [ref=e88]
+          - paragraph [ref=e90]: Layers
+        - generic [ref=e91]:
+          - button "Hide UI (Cmd + .)" [ref=e92] [cursor=pointer]:
+            - img [ref=e93]
+          - button "Add layer" [expanded] [ref=e96] [cursor=pointer]:
+            - img [ref=e97]
+      - list [ref=e99]:
+        - listitem [ref=e100] [cursor=pointer]:
+          - generic [ref=e101]:
+            - button "Reorder CRT" [ref=e102]:
+              - img [ref=e103]
+            - button "CRT" [ref=e105]:
+              - img [ref=e107]
+              - paragraph [ref=e110]: CRT
+          - combobox "Layer actions for CRT" [ref=e112]:
+            - img [ref=e114]
+          - textbox [ref=e116]
+          - button "Hide layer" [ref=e117]:
+            - img [ref=e118]
+          - button "Delete CRT" [ref=e120]:
+            - img [ref=e121]
+        - listitem [ref=e123] [cursor=pointer]:
+          - generic [ref=e124]:
+            - button "Reorder Dithering" [ref=e125]:
+              - img [ref=e126]
+            - button "Dithering" [ref=e128]:
+              - img [ref=e130]
+              - paragraph [ref=e133]: Dithering
+          - combobox "Layer actions for Dithering" [ref=e135]:
+            - img [ref=e137]
+          - textbox [ref=e139]
+          - button "Hide layer" [ref=e140]:
+            - img [ref=e141]
+          - button "Delete Dithering" [ref=e143]:
+            - img [ref=e144]
+        - listitem [ref=e146] [cursor=pointer]:
+          - generic [ref=e147]:
+            - button "Reorder Text" [ref=e148]:
+              - img [ref=e149]
+            - button "Text" [ref=e151]:
+              - img [ref=e153]
+              - paragraph [ref=e156]: Text
+          - combobox "Layer actions for Text" [ref=e158]:
+            - img [ref=e160]
+          - textbox [ref=e162]
+          - button "Hide layer" [ref=e163]:
+            - img [ref=e164]
+          - button "Delete Text" [ref=e166]:
+            - img [ref=e167]
+        - listitem [ref=e169] [cursor=pointer]:
+          - generic [ref=e170]:
+            - button "Reorder Pattern" [ref=e171]:
+              - img [ref=e172]
+            - button "Pattern" [ref=e174]:
+              - img [ref=e176]
+              - paragraph [ref=e179]: Pattern
+          - combobox "Layer actions for Pattern" [ref=e181]:
+            - img [ref=e183]
+          - textbox [ref=e185]
+          - button "Hide layer" [ref=e186]:
+            - img [ref=e187]
+          - button "Delete Pattern" [ref=e189]:
+            - img [ref=e190]
+        - listitem [ref=e192] [cursor=pointer]:
+          - generic [ref=e193]:
+            - button "Reorder Gradient" [ref=e194]:
+              - img [ref=e195]
+            - button "Gradient" [ref=e197]:
+              - img [ref=e199]
+              - paragraph [ref=e212]: Gradient
+          - combobox "Layer actions for Gradient" [ref=e214]:
+            - img [ref=e216]
+          - textbox [ref=e218]
+          - button "Hide layer" [ref=e219]:
+            - img [ref=e220]
+          - button "Delete Gradient" [ref=e222]:
+            - img [ref=e223]
+    - generic [ref=e227]:
+      - generic [ref=e229]:
+        - button "Move properties panel" [ref=e230]:
+          - img [ref=e231]
+        - paragraph [ref=e233]: Properties
+      - generic [ref=e234]:
+        - generic [ref=e236]:
+          - paragraph [ref=e238]: CRT
+          - generic [ref=e239]: Effect
+        - generic [ref=e240]:
+          - generic [ref=e241]:
+            - paragraph [ref=e242]: General
+            - generic [ref=e243]:
+              - group "Opacity" [ref=e244]:
+                - generic [ref=e245]:
+                  - generic [ref=e247]:
+                    - generic [ref=e248]: Opacity
+                    - button [disabled] [ref=e251]:
+                      - img [ref=e252]
+                  - button "Edit slider value" [ref=e256] [cursor=pointer]: 100%
+                - slider "Opacity" [ref=e262]: "100"
+              - generic [ref=e263]:
+                - paragraph [ref=e264]: Blend
+                - combobox [ref=e266] [cursor=pointer]:
+                  - generic [ref=e267]: Normal
+                  - img [ref=e269]
+                - textbox [ref=e271]: normal
+              - generic [ref=e272]:
+                - paragraph [ref=e273]: Mode
+                - combobox [ref=e275] [cursor=pointer]:
+                  - generic [ref=e276]: Filter
+                  - img [ref=e278]
+                - textbox [ref=e280]: filter
+              - group "Hue" [ref=e281]:
+                - generic [ref=e282]:
+                  - generic [ref=e284]:
+                    - generic [ref=e285]: Hue
+                    - button [disabled] [ref=e288]:
+                      - img [ref=e289]
+                  - button "Edit slider value" [ref=e293] [cursor=pointer]: "0"
+                - slider "Hue" [ref=e299]: "0"
+              - group "Saturation" [ref=e300]:
+                - generic [ref=e301]:
+                  - generic [ref=e303]:
+                    - generic [ref=e304]: Saturation
+                    - button [disabled] [ref=e307]:
+                      - img [ref=e308]
+                  - button "Edit slider value" [ref=e312] [cursor=pointer]: "1.00"
+                - slider "Saturation" [ref=e318]: "1"
+          - generic [ref=e320]:
+            - generic [ref=e321]:
+              - paragraph [ref=e323]: Settings
+              - generic [ref=e325]:
+                - generic [ref=e326]:
+                  - paragraph [ref=e328]:
+                    - generic [ref=e329]:
+                      - generic [ref=e330]: Mode
+                      - button [disabled] [ref=e333]:
+                        - img [ref=e334]
+                  - combobox [ref=e337] [cursor=pointer]:
+                    - generic [ref=e338]: Slot-Mask Monitor
+                    - img [ref=e340]
+                  - textbox [ref=e342]: slot-mask
+                - group "Mask Scale" [ref=e343]:
+                  - generic [ref=e344]:
+                    - paragraph [ref=e347]:
+                      - generic [ref=e348]:
+                        - generic [ref=e349]: Mask Scale
+                        - button [disabled] [ref=e352]:
+                          - img [ref=e353]
+                    - button "Edit slider value" [ref=e357] [cursor=pointer]: "6"
+                  - slider "Mask Scale" [ref=e363]: "6"
+                - group "Scanline Intensity" [ref=e364]:
+                  - generic [ref=e365]:
+                    - paragraph [ref=e368]:
+                      - generic [ref=e369]:
+                        - generic [ref=e370]: Scanline Intensity
+                        - button [disabled] [ref=e373]:
+                          - img [ref=e374]
+                    - button "Edit slider value" [ref=e378] [cursor=pointer]: "0.17"
+                  - slider "Scanline Intensity" [ref=e384]: "0.17"
+                - group "Mask Intensity" [ref=e385]:
+                  - generic [ref=e386]:
+                    - paragraph [ref=e389]:
+                      - generic [ref=e390]:
+                        - generic [ref=e391]: Mask Intensity
+                        - button [disabled] [ref=e394]:
+                          - img [ref=e395]
+                    - button "Edit slider value" [ref=e399] [cursor=pointer]: "1"
+                  - slider "Mask Intensity" [ref=e405]: "1"
+            - generic [ref=e406]:
+              - paragraph [ref=e408]: Distortion
+              - generic [ref=e410]:
+                - group "Barrel Distortion" [ref=e411]:
+                  - generic [ref=e412]:
+                    - paragraph [ref=e415]:
+                      - generic [ref=e416]:
+                        - generic [ref=e417]: Barrel Distortion
+                        - button [disabled] [ref=e420]:
+                          - img [ref=e421]
+                    - button "Edit slider value" [ref=e425] [cursor=pointer]: "0.15"
+                  - slider "Barrel Distortion" [ref=e431]: "0.15"
+                - group "Convergence" [ref=e432]:
+                  - generic [ref=e433]:
+                    - paragraph [ref=e436]:
+                      - generic [ref=e437]:
+                        - generic [ref=e438]: Convergence
+                        - button [disabled] [ref=e441]:
+                          - img [ref=e442]
+                    - button "Edit slider value" [ref=e446] [cursor=pointer]: "2"
+                  - slider "Convergence" [ref=e452]: "2"
+                - group "Vignette" [ref=e453]:
+                  - generic [ref=e454]:
+                    - paragraph [ref=e457]:
+                      - generic [ref=e458]:
+                        - generic [ref=e459]: Vignette
+                        - button [disabled] [ref=e462]:
+                          - img [ref=e463]
+                    - button "Edit slider value" [ref=e467] [cursor=pointer]: "0.45"
+                  - slider "Vignette" [ref=e473]: "0.45"
+            - generic [ref=e474]:
+              - paragraph [ref=e476]: Phosphor
+              - generic [ref=e478]:
+                - group "Beam Focus" [ref=e479]:
+                  - generic [ref=e480]:
+                    - paragraph [ref=e483]:
+                      - generic [ref=e484]:
+                        - generic [ref=e485]: Beam Focus
+                        - button [disabled] [ref=e488]:
+                          - img [ref=e489]
+                    - button "Edit slider value" [ref=e493] [cursor=pointer]: "0.58"
+                  - slider "Beam Focus" [ref=e499]: "0.58"
+                - group "Brightness" [ref=e500]:
+                  - generic [ref=e501]:
+                    - paragraph [ref=e504]:
+                      - generic [ref=e505]:
+                        - generic [ref=e506]: Brightness
+                        - button [disabled] [ref=e509]:
+                          - img [ref=e510]
+                    - button "Edit slider value" [ref=e514] [cursor=pointer]: "1.2"
+                  - slider "Brightness" [ref=e520]: "1.2"
+                - group "Highlight Drive" [ref=e521]:
+                  - generic [ref=e522]:
+                    - paragraph [ref=e525]:
+                      - generic [ref=e526]:
+                        - generic [ref=e527]: Highlight Drive
+                        - button [disabled] [ref=e530]:
+                          - img [ref=e531]
+                    - button "Edit slider value" [ref=e535] [cursor=pointer]: "1"
+                  - slider "Highlight Drive" [ref=e540]: "1"
+                - group "Highlight Threshold" [ref=e541]:
+                  - generic [ref=e542]:
+                    - paragraph [ref=e545]:
+                      - generic [ref=e546]:
+                        - generic [ref=e547]: Highlight Threshold
+                        - button [disabled] [ref=e550]:
+                          - img [ref=e551]
+                    - button "Edit slider value" [ref=e555] [cursor=pointer]: "0.62"
+                  - slider "Highlight Threshold" [ref=e561]: "0.62"
+                - group "Shoulder" [ref=e562]:
+                  - generic [ref=e563]:
+                    - paragraph [ref=e566]:
+                      - generic [ref=e567]:
+                        - generic [ref=e568]: Shoulder
+                        - button [disabled] [ref=e571]:
+                          - img [ref=e572]
+                    - button "Edit slider value" [ref=e576] [cursor=pointer]: "0.25"
+                  - slider "Shoulder" [ref=e582]: "0.25"
+                - group "Chroma Retention" [ref=e583]:
+                  - generic [ref=e584]:
+                    - paragraph [ref=e587]:
+                      - generic [ref=e588]:
+                        - generic [ref=e589]: Chroma Retention
+                        - button [disabled] [ref=e592]:
+                          - img [ref=e593]
+                    - button "Edit slider value" [ref=e597] [cursor=pointer]: "1.15"
+                  - slider "Chroma Retention" [ref=e603]: "1.15"
+                - group "Shadow Lift" [ref=e604]:
+                  - generic [ref=e605]:
+                    - paragraph [ref=e608]:
+                      - generic [ref=e609]:
+                        - generic [ref=e610]: Shadow Lift
+                        - button [disabled] [ref=e613]:
+                          - img [ref=e614]
+                    - button "Edit slider value" [ref=e618] [cursor=pointer]: "0.16"
+                  - slider "Shadow Lift" [ref=e624]: "0.16"
+                - group "Persistence" [ref=e625]:
+                  - generic [ref=e626]:
+                    - paragraph [ref=e629]:
+                      - generic [ref=e630]:
+                        - generic [ref=e631]: Persistence
+                        - button [disabled] [ref=e634]:
+                          - img [ref=e635]
+                    - button "Edit slider value" [ref=e639] [cursor=pointer]: "0.18"
+                  - slider "Persistence" [ref=e645]: "0.18"
+            - generic [ref=e646]:
+              - paragraph [ref=e648]: Noise
+              - generic [ref=e650]:
+                - group "Flicker" [ref=e651]:
+                  - generic [ref=e652]:
+                    - paragraph [ref=e655]:
+                      - generic [ref=e656]:
+                        - generic [ref=e657]: Flicker
+                        - button [disabled] [ref=e660]:
+                          - img [ref=e661]
+                    - button "Edit slider value" [ref=e665] [cursor=pointer]: "0.2"
+                  - slider "Flicker" [ref=e671]: "0.2"
+                - group "Glitch" [ref=e672]:
+                  - generic [ref=e673]:
+                    - paragraph [ref=e676]:
+                      - generic [ref=e677]:
+                        - generic [ref=e678]: Glitch
+                        - button [disabled] [ref=e681]:
+                          - img [ref=e682]
+                    - button "Edit slider value" [ref=e686] [cursor=pointer]: "0.13"
+                  - slider "Glitch" [ref=e692]: "0.13"
+                - group "Glitch Speed" [ref=e693]:
+                  - generic [ref=e694]:
+                    - paragraph [ref=e697]:
+                      - generic [ref=e698]:
+                        - generic [ref=e699]: Glitch Speed
+                        - button [disabled] [ref=e702]:
+                          - img [ref=e703]
+                    - button "Edit slider value" [ref=e707] [cursor=pointer]: "5"
+                  - slider "Glitch Speed" [ref=e713]: "5"
+            - generic [ref=e714]:
+              - paragraph [ref=e716]: Bloom
+              - generic [ref=e718]:
+                - generic [ref=e719]:
+                  - paragraph [ref=e721]:
+                    - generic [ref=e722]:
+                      - generic [ref=e723]: Bloom
+                      - button [disabled] [ref=e726]:
+                        - img [ref=e727]
+                  - generic [ref=e729] [cursor=pointer]:
+                    - switch [checked] [ref=e730]
+                    - checkbox [checked] [ref=e732]
+                - group "Intensity" [ref=e733]:
+                  - generic [ref=e734]:
+                    - paragraph [ref=e737]:
+                      - generic [ref=e738]:
+                        - generic [ref=e739]: Intensity
+                        - button [disabled] [ref=e742]:
+                          - img [ref=e743]
+                    - button "Edit slider value" [ref=e747] [cursor=pointer]: "1.93"
+                  - slider "Intensity" [ref=e753]: "1.93"
+                - group "Threshold" [ref=e754]:
+                  - generic [ref=e755]:
+                    - paragraph [ref=e758]:
+                      - generic [ref=e759]:
+                        - generic [ref=e760]: Threshold
+                        - button [disabled] [ref=e763]:
+                          - img [ref=e764]
+                    - button "Edit slider value" [ref=e768] [cursor=pointer]: "0"
+                  - slider "Threshold" [ref=e773]: "0"
+                - group "Radius" [ref=e774]:
+                  - generic [ref=e775]:
+                    - paragraph [ref=e778]:
+                      - generic [ref=e779]:
+                        - generic [ref=e780]: Radius
+                        - button [disabled] [ref=e783]:
+                          - img [ref=e784]
+                    - button "Edit slider value" [ref=e788] [cursor=pointer]: "24"
+                  - slider "Radius" [ref=e794]: "24"
+                - group "Softness" [ref=e795]:
+                  - generic [ref=e796]:
+                    - paragraph [ref=e799]:
+                      - generic [ref=e800]:
+                        - generic [ref=e801]: Softness
+                        - button [disabled] [ref=e804]:
+                          - img [ref=e805]
+                    - button "Edit slider value" [ref=e809] [cursor=pointer]: "0.2"
+                  - slider "Softness" [ref=e815]: "0.2"
+  - button "Open Next.js Dev Tools" [ref=e12] [cursor=pointer]:
+    - img [ref=e13]
+  - alert [ref=e16]
+  - generic [ref=e817]:
+    - generic [ref=e818]:
+      - generic [ref=e819]: Source
+      - generic [ref=e820]:
+        - button "Image" [active] [ref=e821] [cursor=pointer]:
+          - img [ref=e822]
+          - text: Image
+        - button "Video" [ref=e824] [cursor=pointer]:
+          - img [ref=e825]
+          - text: Video
+        - button "Camera" [ref=e827] [cursor=pointer]:
+          - img [ref=e828]
+          - text: Camera
+        - button "Text" [ref=e830] [cursor=pointer]:
+          - img [ref=e831]
+          - text: Text
+        - button "Fluid" [ref=e833] [cursor=pointer]:
+          - img [ref=e834]
+          - text: Fluid
+        - button "Pixel Trail" [ref=e836] [cursor=pointer]:
+          - img [ref=e837]
+          - text: Pixel Trail
+        - button "Magnify Lens" [ref=e839] [cursor=pointer]:
+          - img [ref=e840]
+          - text: Magnify Lens
+        - button "Mesh Gradient" [ref=e842] [cursor=pointer]:
+          - img [ref=e843]
+          - text: Mesh Gradient
+        - button "Custom Shader" [ref=e845] [cursor=pointer]:
+          - img [ref=e846]
+          - text: Custom Shader
+    - generic [ref=e848]:
+      - generic [ref=e850]:
+        - button "All" [ref=e851] [cursor=pointer]:
+          - generic [ref=e853]: All
+        - button "Core" [ref=e854] [cursor=pointer]:
+          - generic [ref=e855]: Core
+        - button "Distort" [ref=e856] [cursor=pointer]:
+          - generic [ref=e857]: Distort
+      - generic [ref=e860]:
+        - button "ASCII ASCII" [ref=e862] [cursor=pointer]:
+          - img "ASCII" [ref=e865]
+          - generic [ref=e867]: ASCII
+        - button "Ink Ink" [ref=e869] [cursor=pointer]:
+          - img "Ink" [ref=e872]
+          - generic [ref=e874]: Ink
+        - button "Pattern Pattern" [ref=e876] [cursor=pointer]:
+          - img "Pattern" [ref=e879]
+          - generic [ref=e881]: Pattern
+        - button "CRT CRT" [ref=e883] [cursor=pointer]:
+          - img "CRT" [ref=e886]
+          - generic [ref=e888]: CRT
+        - button "Dithering Dithering" [ref=e890] [cursor=pointer]:
+          - img "Dithering" [ref=e893]
+          - generic [ref=e895]: Dithering
+        - button "Halftone Halftone" [ref=e897] [cursor=pointer]:
+          - img "Halftone" [ref=e900]
+          - generic [ref=e902]: Halftone
+        - button "Particle Grid Particle Grid" [ref=e904] [cursor=pointer]:
+          - img "Particle Grid" [ref=e907]
+          - generic [ref=e909]: Particle Grid
+        - button "Pixelation Pixelation" [ref=e911] [cursor=pointer]:
+          - img "Pixelation" [ref=e914]
+          - generic [ref=e916]: Pixelation
+        - button "Voxel Voxel" [ref=e918] [cursor=pointer]:
+          - img "Voxel" [ref=e921]
+          - generic [ref=e923]: Voxel
+        - button "Posterize Posterize" [ref=e925] [cursor=pointer]:
+          - img "Posterize" [ref=e928]
+          - generic [ref=e930]: Posterize
+        - button "Threshold Threshold" [ref=e932] [cursor=pointer]:
+          - img "Threshold" [ref=e935]
+          - generic [ref=e937]: Threshold
+        - button "Bloom" [ref=e939] [cursor=pointer]:
+          - generic [ref=e943]: Bloom
+        - button "Plotter Plotter" [ref=e945] [cursor=pointer]:
+          - img "Plotter" [ref=e948]
+          - generic [ref=e950]: Plotter
+        - button "Circuit Bent Circuit Bent" [ref=e952] [cursor=pointer]:
+          - img "Circuit Bent" [ref=e955]
+          - generic [ref=e957]: Circuit Bent
+        - button "Directional Blur Directional Blur" [ref=e959] [cursor=pointer]:
+          - img "Directional Blur" [ref=e962]
+          - generic [ref=e964]: Directional Blur
+        - button "Pixel Sorting Pixel Sorting" [ref=e966] [cursor=pointer]:
+          - img "Pixel Sorting" [ref=e969]
+          - generic [ref=e971]: Pixel Sorting
+        - button "Slice Slice" [ref=e973] [cursor=pointer]:
+          - img "Slice" [ref=e976]
+          - generic [ref=e978]: Slice
+        - button "Edge Detect Edge Detect" [ref=e980] [cursor=pointer]:
+          - img "Edge Detect" [ref=e983]
+          - generic [ref=e985]: Edge Detect
+        - button "Displacement Map Displacement Map" [ref=e987] [cursor=pointer]:
+          - img "Displacement Map" [ref=e990]
+          - generic [ref=e992]: Displacement Map
+        - button "Chromatic Aberration Chromatic Aberration" [ref=e994] [cursor=pointer]:
+          - img "Chromatic Aberration" [ref=e997]
+          - generic [ref=e999]: Chromatic Aberration
+        - button "Progressive Blur Progressive Blur" [ref=e1001] [cursor=pointer]:
+          - img "Progressive Blur" [ref=e1004]
+          - generic [ref=e1006]: Progressive Blur
+        - button "Fluted Glass Fluted Glass" [ref=e1008] [cursor=pointer]:
+          - img "Fluted Glass" [ref=e1011]
+          - generic [ref=e1013]: Fluted Glass
