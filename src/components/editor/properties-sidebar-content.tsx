@@ -1,8 +1,34 @@
 "use client"
 
+import { getMaskParameterDefinition } from "@/lib/editor/mask-animation"
+import { CellPaintControls } from "./cell-paint-controls"
+import {
+  AnnotationsPaintedPlacement,
+  applyAnnotationPreset,
+} from "./annotations-controls"
+import { GRADIENT_MAP_RAMP_BINDING } from "./gradient-map-controls"
+import {
+  EffectPaletteControls,
+  EffectStyleControls,
+} from "./effect-style-controls"
+import { PatternMotifControls } from "./pattern-motif-controls"
+import { SvgShapePalette, SvgShapeSource } from "./svg-shape-controls"
+import { ModelControls } from "./model-controls"
+import type { ModelClipInfo } from "@/lib/editor/model-animation"
+import { LayerMaskSection } from "./layer-mask-section"
+import { useTextEditStore } from "@/store/text-edit-store"
+import { LayerGroupLocation } from "@/components/editor/layer-group-location"
+
 import { TextAlignRightIcon } from "@radix-ui/react-icons"
 import { AnimatePresence, motion } from "motion/react"
-import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import {
+  Fragment,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react"
 import { Button } from "@/components/ui/button"
 import { IconButton } from "@/components/ui/icon-button"
 import { Select } from "@/components/ui/select"
@@ -21,7 +47,6 @@ import {
   startFluidInteractionRecording,
   stopFluidInteractionRecording,
 } from "@/lib/editor/fluid-interaction-recorder"
-import { formatCustomShaderSource } from "@/renderer/custom-shader-runtime"
 import { useLayerStore } from "@/store/layer-store"
 import { useTimelineStore } from "@/store/timeline-store"
 import type {
@@ -34,7 +59,11 @@ import type {
   MaskSource,
   ParameterDefinition,
   ParameterValue,
+  LayerMask,
+  LayerKind,
 } from "@/types/editor"
+import type { AudioLinkControl } from "@/components/editor/audio-link-button"
+import { BlobInnerEffectSection } from "./blob-inner-effect-section"
 import {
   ParameterField,
   renderFieldLabel,
@@ -202,10 +231,13 @@ function CustomShaderSection({
             aria-label="Format sketch source"
             className="shrink-0"
             onClick={() => {
-              void formatCustomShaderSource({
-                fileName: "custom-shader.ts",
-                sourceCode: draftSource,
-              })
+              void import("@/renderer/custom-shader-runtime")
+                .then(({ formatCustomShaderSource }) =>
+                  formatCustomShaderSource({
+                    fileName: "custom-shader.ts",
+                    sourceCode: draftSource,
+                  })
+                )
                 .then((formatted) => {
                   setDraftSource(formatted)
                   setFormatError(null)
@@ -238,9 +270,21 @@ function CustomShaderSection({
   )
 }
 
+function estimateDepthLabel(working: boolean, hasDepthMap: boolean): string {
+  if (working) {
+    return "Working…"
+  }
+
+  return hasDepthMap ? "Estimate again" : "Estimate"
+}
+
 export function SelectedLayerPropertiesContent({
   blendMode,
   compositeMode,
+  mask,
+  maskInGroup,
+  maskLayerKind,
+  setLayerMask,
   maskConfig,
   setLayerMaskConfig,
   definitionName,
@@ -248,12 +292,26 @@ export function SelectedLayerPropertiesContent({
   hue,
   onInteractionEnd,
   onInteractionStart,
+  canEstimateDepthMap,
+  depthEstimationLabel,
+  depthMapFileName,
+  hasDepthMap,
   layerId,
   layerKind,
   layerName,
   layerRuntimeError,
   layerSubtitle,
   layerType,
+  onAttachDepthMap,
+  onEstimateDepthMap,
+  onRemoveDepthMap,
+  onReplaceImage,
+  modelClips,
+  modelEnvironmentFileName,
+  modelSvgSource,
+  onAttachEnvironment,
+  onRemoveEnvironment,
+  onReplaceModel,
   onToggleParamGroup,
   onTimelineKeyframe,
   opacity,
@@ -272,6 +330,10 @@ export function SelectedLayerPropertiesContent({
 }: {
   blendMode: BlendMode
   compositeMode: LayerCompositeMode
+  mask: LayerMask | null | undefined
+  maskInGroup: boolean
+  maskLayerKind: LayerKind
+  setLayerMask: (id: string, updates: Partial<LayerMask>) => void
   maskConfig: MaskConfig
   setLayerMaskConfig: (id: string, updates: Partial<MaskConfig>) => void
   definitionName: string
@@ -285,7 +347,21 @@ export function SelectedLayerPropertiesContent({
   layerRuntimeError: string | null
   layerSubtitle: string
   layerType: LayerType
-  onToggleParamGroup: (groupId: string) => void
+  canEstimateDepthMap: boolean
+  depthEstimationLabel: string | null
+  depthMapFileName: string | null
+  hasDepthMap: boolean
+  onAttachDepthMap: () => void
+  onEstimateDepthMap: () => void
+  onRemoveDepthMap: () => void
+  onReplaceImage: () => void
+  modelClips: readonly ModelClipInfo[]
+  modelEnvironmentFileName: string | null
+  modelSvgSource: boolean
+  onAttachEnvironment: () => void
+  onRemoveEnvironment: () => void
+  onReplaceModel: () => void
+  onToggleParamGroup: (groupId: string, expanded: boolean) => void
   onTimelineKeyframe: (
     binding: AnimatedPropertyBinding,
     layerId: string,
@@ -506,6 +582,78 @@ export function SelectedLayerPropertiesContent({
     [hasTrack, layerId, onTimelineKeyframe, reduceMotion, timelinePanelOpen]
   )
 
+  const buildAudioControl = useCallback(
+    (binding: AnimatedPropertyBinding | null): AudioLinkControl | null =>
+      binding ? { binding, definition: null, layerId } : null,
+    [layerId]
+  )
+
+  const onParamChange = (id: string, key: string, value: ParameterValue) => {
+    if (layerType === "annotations" && key === "textPreset") {
+      applyAnnotationPreset(id, value, updateLayerParam)
+      return
+    }
+    updateLayerParam(id, key, value)
+  }
+
+  const renderAfterParam = (key: string) => {
+    if (layerType === "annotations") {
+      if (key === "placement" && values.placement === "painted") {
+        return <AnnotationsPaintedPlacement layerId={layerId} />
+      }
+    }
+    if (layerType === "annotations" || layerType === "connected-dots") {
+      return (
+        <EffectPaletteControls
+          layerId={layerId}
+          layerType={layerType}
+          onInteractionEnd={onInteractionEnd}
+          onInteractionStart={onInteractionStart}
+          paramKey={key}
+          updateLayerParam={updateLayerParam}
+          values={values}
+        />
+      )
+    }
+    if (layerType === "pattern" && key === "preset" && values.preset === "custom") {
+      return (
+        <PatternMotifControls
+          layerId={layerId}
+          onInteractionEnd={onInteractionEnd}
+          onInteractionStart={onInteractionStart}
+          updateLayerParam={updateLayerParam}
+          values={values}
+        />
+      )
+    }
+    if (layerType === "shape" && values.shape === "svg" && key === "shape") {
+      return (
+        <SvgShapeSource
+          layerId={layerId}
+          updateLayerParam={updateLayerParam}
+          values={values}
+        />
+      )
+    }
+    if (
+      layerType === "shape" &&
+      values.shape === "svg" &&
+      key === "svgColorMode" &&
+      values.svgColorMode !== "single"
+    ) {
+      return (
+        <SvgShapePalette
+          layerId={layerId}
+          onInteractionEnd={onInteractionEnd}
+          onInteractionStart={onInteractionStart}
+          updateLayerParam={updateLayerParam}
+          values={values}
+        />
+      )
+    }
+    return null
+  }
+
   return (
     <>
       <div className="flex flex-col gap-2 border-b border-[var(--ds-border-divider)] px-4 pt-[14px] pb-3">
@@ -529,7 +677,10 @@ export function SelectedLayerPropertiesContent({
         </div>
       </div>
 
-      <div className="flex min-h-0 max-h-[min(62vh,620px)] flex-col gap-0 overflow-x-hidden overflow-y-auto">
+      <div
+        className="flex min-h-0 max-h-[min(62vh,620px)] flex-col gap-0 overflow-x-hidden overflow-y-auto"
+        data-ds="panel-scroll"
+      >
         <section className="flex flex-col gap-3 border-t border-[var(--ds-border-divider)] px-4 pt-[14px] pb-4 first:border-t-0">
           <Typography className="uppercase" tone="secondary" variant="overline">
             General
@@ -539,7 +690,8 @@ export function SelectedLayerPropertiesContent({
             <Slider
               label={renderFieldLabel(
                 "Opacity",
-                buildTimelineControl(opacityBinding, opacity)
+                buildTimelineControl(opacityBinding, opacity),
+                buildAudioControl(opacityBinding)
               )}
               max={100}
               min={0}
@@ -550,6 +702,7 @@ export function SelectedLayerPropertiesContent({
               valueSuffix="%"
             />
 
+            <LayerGroupLocation layerId={layerId} />
             <div className="grid items-center gap-[10px] [grid-template-columns:minmax(0,1fr)_132px]">
               <Typography className="min-w-0" tone="secondary" variant="label">
                 Blend
@@ -567,24 +720,7 @@ export function SelectedLayerPropertiesContent({
               />
             </div>
 
-            <div className="grid items-center gap-[10px] [grid-template-columns:minmax(0,1fr)_132px]">
-              <Typography className="min-w-0" tone="secondary" variant="label">
-                Mode
-              </Typography>
-              <Select
-                className="w-[132px]"
-                onValueChange={(value) => {
-                  if (value) {
-                    setLayerCompositeMode(layerId, value as LayerCompositeMode)
-                  }
-                }}
-                options={compositeModeOptions}
-                triggerClassName="w-[132px]"
-                value={compositeMode}
-              />
-            </div>
-
-            {compositeMode === "mask" && (
+            {layerType !== "group" && (
               <>
                 <div className="grid items-center gap-[10px] [grid-template-columns:minmax(0,1fr)_132px]">
                   <Typography
@@ -592,95 +728,147 @@ export function SelectedLayerPropertiesContent({
                     tone="secondary"
                     variant="label"
                   >
-                    Source
+                    Mode
                   </Typography>
                   <Select
                     className="w-[132px]"
                     onValueChange={(value) => {
                       if (value) {
-                        setLayerMaskConfig(layerId, {
-                          source: value as MaskSource,
-                        })
+                        setLayerCompositeMode(
+                          layerId,
+                          value as LayerCompositeMode
+                        )
                       }
                     }}
-                    options={maskSourceOptions}
+                    options={compositeModeOptions}
                     triggerClassName="w-[132px]"
-                    value={maskConfig.source}
+                    value={compositeMode}
                   />
                 </div>
 
-                <div className="grid items-center gap-[10px] [grid-template-columns:minmax(0,1fr)_132px]">
-                  <Typography
-                    className="min-w-0"
-                    tone="secondary"
-                    variant="label"
-                  >
-                    Mask Mode
-                  </Typography>
-                  <Select
-                    className="w-[132px]"
-                    onValueChange={(value) => {
-                      if (value) {
-                        setLayerMaskConfig(layerId, { mode: value as MaskMode })
-                      }
-                    }}
-                    options={maskModeOptions}
-                    triggerClassName="w-[132px]"
-                    value={maskConfig.mode}
-                  />
-                </div>
+                {compositeMode === "mask" && (
+                  <>
+                    <div className="grid items-center gap-[10px] [grid-template-columns:minmax(0,1fr)_132px]">
+                      <Typography
+                        className="min-w-0"
+                        tone="secondary"
+                        variant="label"
+                      >
+                        Source
+                      </Typography>
+                      <Select
+                        className="w-[132px]"
+                        onValueChange={(value) => {
+                          if (value) {
+                            setLayerMaskConfig(layerId, {
+                              source: value as MaskSource,
+                            })
+                          }
+                        }}
+                        options={maskSourceOptions}
+                        triggerClassName="w-[132px]"
+                        value={maskConfig.source}
+                      />
+                    </div>
 
-                <div className="grid items-center gap-[10px] [grid-template-columns:minmax(0,1fr)_132px]">
-                  <Typography
-                    className="min-w-0"
-                    tone="secondary"
-                    variant="label"
-                  >
-                    Invert
-                  </Typography>
-                  <Toggle
-                    checked={maskConfig.invert}
-                    className="justify-self-end"
-                    onCheckedChange={(nextValue) =>
-                      setLayerMaskConfig(layerId, { invert: nextValue })
-                    }
-                  />
-                </div>
+                    <div className="grid items-center gap-[10px] [grid-template-columns:minmax(0,1fr)_132px]">
+                      <Typography
+                        className="min-w-0"
+                        tone="secondary"
+                        variant="label"
+                      >
+                        Mask Mode
+                      </Typography>
+                      <Select
+                        className="w-[132px]"
+                        onValueChange={(value) => {
+                          if (value) {
+                            setLayerMaskConfig(layerId, {
+                              mode: value as MaskMode,
+                            })
+                          }
+                        }}
+                        options={maskModeOptions}
+                        triggerClassName="w-[132px]"
+                        value={maskConfig.mode}
+                      />
+                    </div>
+
+                    <div className="grid items-center gap-[10px] [grid-template-columns:minmax(0,1fr)_132px]">
+                      <Typography
+                        className="min-w-0"
+                        tone="secondary"
+                        variant="label"
+                      >
+                        Invert
+                      </Typography>
+                      <Toggle
+                        checked={maskConfig.invert}
+                        className="justify-self-end"
+                        onCheckedChange={(nextValue) =>
+                          setLayerMaskConfig(layerId, { invert: nextValue })
+                        }
+                      />
+                    </div>
+                  </>
+                )}
+
+                <Slider
+                  label={renderFieldLabel(
+                    "Hue",
+                    buildTimelineControl(hueBinding, hue),
+                    buildAudioControl(hueBinding)
+                  )}
+                  max={180}
+                  min={-180}
+                  onInteractionStart={onInteractionStart}
+                  onValueChange={(value) => setLayerHue(layerId, value)}
+                  onValueCommitted={() => onInteractionEnd?.()}
+                  value={hue}
+                />
+
+                <Slider
+                  label={renderFieldLabel(
+                    "Saturation",
+                    buildTimelineControl(saturationBinding, saturation),
+                    buildAudioControl(saturationBinding)
+                  )}
+                  max={2}
+                  min={0}
+                  onInteractionStart={onInteractionStart}
+                  onValueChange={(value) => setLayerSaturation(layerId, value)}
+                  onValueCommitted={() => onInteractionEnd?.()}
+                  step={0.01}
+                  value={saturation}
+                  valueFormatOptions={{
+                    maximumFractionDigits: 2,
+                    minimumFractionDigits: 2,
+                  }}
+                />
               </>
             )}
-
-            <Slider
-              label={renderFieldLabel(
-                "Hue",
-                buildTimelineControl(hueBinding, hue)
-              )}
-              max={180}
-              min={-180}
-              onInteractionStart={onInteractionStart}
-              onValueChange={(value) => setLayerHue(layerId, value)}
-              onValueCommitted={() => onInteractionEnd?.()}
-              value={hue}
-            />
-
-            <Slider
-              label={renderFieldLabel(
-                "Saturation",
-                buildTimelineControl(saturationBinding, saturation)
-              )}
-              max={2}
-              min={0}
-              onInteractionStart={onInteractionStart}
-              onValueChange={(value) => setLayerSaturation(layerId, value)}
-              onValueCommitted={() => onInteractionEnd?.()}
-              step={0.01}
-              value={saturation}
-              valueFormatOptions={{
-                maximumFractionDigits: 2,
-                minimumFractionDigits: 2,
-              }}
-            />
           </div>
         </section>
+
+        <LayerMaskSection
+          layerId={layerId}
+          inGroup={maskInGroup}
+          layerKind={maskLayerKind}
+          mask={mask}
+          onInteractionEnd={onInteractionEnd}
+          onInteractionStart={onInteractionStart}
+          setLayerMask={setLayerMask}
+          timelineControl={(key, value) =>
+            buildTimelineControl(
+              createParamTimelineBinding(
+                getMaskParameterDefinition(mask?.shape ?? "none", key) ??
+                  ({ defaultValue: 0, key, label: key, type: "number" } as const)
+              ),
+              value
+            )
+          }
+          updateLayerParam={updateLayerParam}
+        />
 
         {layerType === "custom-shader" ? (
           <CustomShaderSection
@@ -688,6 +876,145 @@ export function SelectedLayerPropertiesContent({
             updateLayerParam={updateLayerParam}
             values={values}
           />
+        ) : null}
+
+        {layerType === "image" ? (
+          <section className="flex flex-col gap-3 border-t border-[var(--ds-border-divider)] px-4 pt-[14px] pb-4 first:border-t-0">
+            <Typography
+              className="uppercase"
+              tone="secondary"
+              variant="overline"
+            >
+              Source
+            </Typography>
+            <div className="flex items-center justify-between gap-3">
+              <Typography tone="muted" variant="caption">
+                Swap in a different image and keep this layer's settings.
+              </Typography>
+              <Button
+                onClick={onReplaceImage}
+                size="compact"
+                uiSound="action.relinkAsset"
+                variant="secondary"
+              >
+                Replace
+              </Button>
+            </div>
+            <div className="flex flex-col gap-2">
+              <div className="flex min-w-0 flex-col gap-0.5">
+                <Typography tone="secondary" variant="caption">
+                  Depth map
+                </Typography>
+                <Typography className="truncate" tone="muted" variant="caption">
+                  {depthEstimationLabel ??
+                    (hasDepthMap
+                      ? (depthMapFileName ?? "Attached")
+                      : "Estimate one from the image, or attach a grayscale map. White is near.")}
+                </Typography>
+              </div>
+              <div className="flex flex-wrap items-center gap-1.5">
+                {canEstimateDepthMap ? (
+                  <Button
+                    disabled={depthEstimationLabel !== null}
+                    onClick={onEstimateDepthMap}
+                    size="compact"
+                    variant={hasDepthMap ? "secondary" : "primary"}
+                  >
+                    {estimateDepthLabel(depthEstimationLabel !== null, hasDepthMap)}
+                  </Button>
+                ) : null}
+                <Button
+                  disabled={depthEstimationLabel !== null}
+                  onClick={onAttachDepthMap}
+                  size="compact"
+                  uiSound="action.relinkAsset"
+                  variant="secondary"
+                >
+                  {hasDepthMap ? "Replace" : "Attach"}
+                </Button>
+                {hasDepthMap ? (
+                  <Button
+                    onClick={onRemoveDepthMap}
+                    size="compact"
+                    variant="ghost"
+                  >
+                    Remove
+                  </Button>
+                ) : null}
+              </div>
+            </div>
+          </section>
+        ) : null}
+
+        {layerType === "model" ? (
+          <ModelControls
+            clips={modelClips}
+            environmentFileName={modelEnvironmentFileName}
+            layerId={layerId}
+            onAttachEnvironment={onAttachEnvironment}
+            onChange={updateLayerParam}
+            onInteractionEnd={onInteractionEnd}
+            onInteractionStart={onInteractionStart}
+            onRemoveEnvironment={onRemoveEnvironment}
+            onReplaceModel={onReplaceModel}
+            onTimelineKeyframe={onTimelineKeyframe}
+            reduceMotion={reduceMotion}
+            svgSource={modelSvgSource}
+            timelinePanelOpen={timelinePanelOpen}
+            values={values}
+          />
+        ) : null}
+
+        {layerType === "photographic-cells" && values.mode === "paint" && (
+          <CellPaintControls layerId={layerId} />
+        )}
+
+        <EffectStyleControls
+          gradientMapTimelineControl={
+            layerType === "gradient-map"
+              ? buildTimelineControl(
+                  GRADIENT_MAP_RAMP_BINDING,
+                  values.stops ?? ""
+                )
+              : null
+          }
+          layerId={layerId}
+          layerType={layerType}
+          onInteractionEnd={onInteractionEnd}
+          onInteractionStart={onInteractionStart}
+          updateLayerParam={updateLayerParam}
+          values={values}
+        />
+
+        {layerType === "text" ? (
+          <section className="flex flex-col gap-3 border-t border-[var(--ds-border-divider)] px-4 pt-[14px] pb-4 first:border-t-0">
+            <Typography
+              className="uppercase"
+              tone="secondary"
+              variant="overline"
+            >
+              Canvas
+            </Typography>
+            <div className="flex items-center justify-between gap-3">
+              <Typography tone="muted" variant="caption">
+                Type in place; drag the handles to move, rotate and resize.
+              </Typography>
+              <Button
+                onClick={() =>
+                  useTextEditStore
+                    .getState()
+                    .edit(
+                      layerId,
+                      typeof values.text === "string" ? values.text : ""
+                    )
+                }
+                size="compact"
+                variant="secondary"
+              >
+                Edit text
+              </Button>
+            </div>
+          </section>
         ) : null}
 
         {layerType === "gradient" ? (
@@ -701,8 +1028,9 @@ export function SelectedLayerPropertiesContent({
             </Typography>
             <div className="flex items-center justify-between gap-3">
               <Typography tone="muted" variant="caption">
-                Randomize all points, distortion, animation, and finish
-                settings.
+                New palette and point layout. Distortion, motion and finish
+                stay. Drag the color points on the canvas; double-click one to
+                change its color, Alt-drag to change its reach.
               </Typography>
               <Button
                 onClick={() => randomizeGradientParams(layerId)}
@@ -710,7 +1038,7 @@ export function SelectedLayerPropertiesContent({
                 uiSound="action.randomize"
                 variant="secondary"
               >
-                Randomize
+                Shuffle
               </Button>
             </div>
           </section>
@@ -773,7 +1101,8 @@ export function SelectedLayerPropertiesContent({
               <div className="flex flex-col gap-3">
                 {groupedParams.map((group) => {
                   const groupKey = `${layerId}:${group.id}`
-                  const isExpanded = expandedParamGroups[groupKey] ?? true
+                  const isExpanded =
+                    expandedParamGroups[groupKey] ?? group.defaultExpanded
 
                   return (
                     <div className="flex flex-col gap-[10px]" key={group.id}>
@@ -781,7 +1110,9 @@ export function SelectedLayerPropertiesContent({
                         <button
                           aria-expanded={isExpanded}
                           className="inline-flex min-h-0 cursor-pointer items-center bg-transparent p-0 text-left text-inherit transition-[background-color,color,transform] duration-120 ease-[ease] hover:text-[var(--ds-color-text-primary)] active:scale-[0.99]"
-                          onClick={() => onToggleParamGroup(groupKey)}
+                          onClick={() =>
+                            onToggleParamGroup(groupKey, !isExpanded)
+                          }
                           type="button"
                         >
                           <div className="inline-flex min-w-0 items-center gap-2">
@@ -838,24 +1169,38 @@ export function SelectedLayerPropertiesContent({
                           >
                             <div className="flex flex-col gap-[10px]">
                               {group.params.map((param) => (
-                                <ParameterField
-                                  definition={param}
-                                  key={param.key}
+                                <Fragment key={param.key}>
+                                  <ParameterField
+                                    definition={param}
+                                    layerId={layerId}
+                                    onInteractionEnd={onInteractionEnd}
+                                    onInteractionStart={onInteractionStart}
+                                    onChange={onParamChange}
+                                    onTimelineKeyframe={onTimelineKeyframe}
+                                    reduceMotion={reduceMotion}
+                                    timelineBinding={createParamTimelineBinding(
+                                      param
+                                    )}
+                                    timelinePanelOpen={timelinePanelOpen}
+                                    value={
+                                      values[param.key] ?? param.defaultValue
+                                    }
+                                  />
+                                  {renderAfterParam(param.key)}
+                                </Fragment>
+                              ))}
+
+                              {group.params.some(
+                                (param) => param.key === "innerEffectType"
+                              ) ? (
+                                <BlobInnerEffectSection
                                   layerId={layerId}
                                   onInteractionEnd={onInteractionEnd}
                                   onInteractionStart={onInteractionStart}
-                                  onChange={updateLayerParam}
-                                  onTimelineKeyframe={onTimelineKeyframe}
-                                  reduceMotion={reduceMotion}
-                                  timelineBinding={createParamTimelineBinding(
-                                    param
-                                  )}
-                                  timelinePanelOpen={timelinePanelOpen}
-                                  value={
-                                    values[param.key] ?? param.defaultValue
-                                  }
+                                  updateLayerParam={updateLayerParam}
+                                  values={values}
                                 />
-                              ))}
+                              ) : null}
                             </div>
                           </motion.div>
                         ) : null}
@@ -867,20 +1212,32 @@ export function SelectedLayerPropertiesContent({
             ) : (
               <div className="flex flex-col gap-[10px]">
                 {visibleParams.map((param) => (
-                  <ParameterField
-                    definition={param}
-                    key={param.key}
+                  <Fragment key={param.key}>
+                    <ParameterField
+                      definition={param}
+                      layerId={layerId}
+                      onInteractionEnd={onInteractionEnd}
+                      onInteractionStart={onInteractionStart}
+                      onChange={onParamChange}
+                      onTimelineKeyframe={onTimelineKeyframe}
+                      reduceMotion={reduceMotion}
+                      timelineBinding={createParamTimelineBinding(param)}
+                      timelinePanelOpen={timelinePanelOpen}
+                      value={values[param.key] ?? param.defaultValue}
+                    />
+                    {renderAfterParam(param.key)}
+                  </Fragment>
+                ))}
+
+                {layerType === "blob-tracking" ? (
+                  <BlobInnerEffectSection
                     layerId={layerId}
                     onInteractionEnd={onInteractionEnd}
                     onInteractionStart={onInteractionStart}
-                    onChange={updateLayerParam}
-                    onTimelineKeyframe={onTimelineKeyframe}
-                    reduceMotion={reduceMotion}
-                    timelineBinding={createParamTimelineBinding(param)}
-                    timelinePanelOpen={timelinePanelOpen}
-                    value={values[param.key] ?? param.defaultValue}
+                    updateLayerParam={updateLayerParam}
+                    values={values}
                   />
-                ))}
+                ) : null}
               </div>
             )}
           </section>

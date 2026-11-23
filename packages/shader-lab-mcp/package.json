@@ -1,0 +1,52 @@
+{
+  "name": "@basementstudio/shader-lab-mcp",
+  "description": "MCP server that drives the Shader Lab editor: layer control and custom shader authoring. Built with xmcp.",
+  "version": "0.2.0",
+  "license": "MIT",
+  "author": "Tobi Moccagatta (https://github.com/git-chad)",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/basementstudio/shader-lab.git",
+    "directory": "packages/shader-lab-mcp"
+  },
+  "homepage": "https://github.com/basementstudio/shader-lab/tree/main/packages/shader-lab-mcp#readme",
+  "keywords": [
+    "mcp",
+    "shader",
+    "webgpu",
+    "tsl",
+    "three",
+    "shader-lab"
+  ],
+  "bin": {
+    "shader-lab-mcp": "dist/stdio.js"
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "generate": "bun run scripts/generate-reference-data.ts",
+    "build": "bun run generate && xmcp build 1>&2",
+    "dev": "xmcp dev",
+    "start": "bun run build && node dist/stdio.js",
+    "prepublishOnly": "bun run build",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "ws": "^8.21.0",
+    "xmcp": "0.8.0",
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "@modelcontextprotocol/sdk": "^1.26.0",
+    "@types/bun": "^1.3.6",
+    "@types/node": "^26.1.1",
+    "@types/ws": "^8.18.1",
+    "@xmcp-dev/compiler": "0.8.0-canary-20260819170002",
+    "typescript": "^5.9.3"
+  }
+}

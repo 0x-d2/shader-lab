@@ -3,6 +3,7 @@ export {
   createRuntimeClock,
   type ShaderLabRuntimeClock,
 } from "./runtime-clock"
+export type { ShaderLabBlobInnerEffect } from "./renderer/blob-tracking-inner-effects"
 export { buildRuntimeFrame, type ShaderLabRuntimeFrame } from "./runtime-frame"
 export {
   createShaderLabFluidRuntime,
@@ -48,6 +49,9 @@ export type {
   ShaderLabKeyframeEasing,
   ShaderLabLayerConfig,
   ShaderLabLayerKind,
+  ShaderLabLayerMask,
+  ShaderLabLayerMaskScope,
+  ShaderLabLayerMaskShape,
   ShaderLabLayerType,
   ShaderLabModuleSketchSource,
   ShaderLabParameterValue,

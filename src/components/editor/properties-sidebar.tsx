@@ -2,26 +2,52 @@
 
 import { DragHandleDots2Icon } from "@radix-ui/react-icons"
 import { AnimatePresence, motion, useReducedMotion } from "motion/react"
+import type { ChangeEvent } from "react"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { FloatingDesktopPanel } from "@/components/editor/floating-desktop-panel"
 import { GlassPanel } from "@/components/ui/glass-panel"
+import { useDisplayedTimelineTime } from "@/hooks/use-displayed-timeline-time"
 import { IconButton } from "@/components/ui/icon-button"
 import { Typography } from "@/components/ui/typography"
 import { cn } from "@/lib/cn"
 import { getLayerDefinition } from "@/lib/editor/config/layer-registry"
-import { isSvgMediaSource } from "@/lib/editor/media-file"
+import {
+  applyMaskOverrides,
+  getMaskParameterDefinition,
+  isMaskParamKey,
+  maskFieldOf,
+  maskUpdatesFor,
+} from "@/lib/editor/mask-animation"
+import {
+  describeDepthProgress,
+  estimateDepthMap,
+} from "@/lib/editor/depth/estimate-depth-client"
+import {
+  getAssetAccept,
+  inferFileAssetKind,
+  isSvgMediaSource,
+} from "@/lib/editor/media-file"
 import { evaluateTimelineForLayers } from "@/lib/editor/timeline/evaluate"
+import {
+  CUSTOM_MODEL_ENVIRONMENT,
+  DEFAULT_MODEL_ENVIRONMENT,
+  modelMaterialDefaults,
+} from "@/lib/editor/config/model-options"
+import { canPaintCellLayer, useCellPaintStore } from "@/store/cell-paint-store"
 import { useAssetStore } from "@/store/asset-store"
+import { useModelClips } from "@/components/editor/use-model-clips"
 import { useEditorStore } from "@/store/editor-store"
+import { getSeedableMediaDuration } from "@/lib/editor/timeline-duration"
 import { useLayerStore } from "@/store/layer-store"
 import {
   createLayerPropertyBinding,
   useTimelineStore,
 } from "@/store/timeline-store"
-import type {
-  AnimatedPropertyBinding,
-  ParameterDefinition,
-  ParameterValue,
+import {
+  type AnimatedPropertyBinding,
+  DEFAULT_LAYER_MASK,
+  type ParameterDefinition,
+  type ParameterValue,
 } from "@/types/editor"
 import {
   EmptyPropertiesContent,
@@ -33,6 +59,7 @@ import {
   hasTrackForBinding,
   isParamVisible,
 } from "./properties-sidebar-utils"
+import { MeasuringLayoutProvider } from "./properties-sidebar-measure"
 import { SceneConfigContent } from "./scene-config-content"
 
 export function PropertiesSidebar() {
@@ -47,7 +74,19 @@ export function PropertiesSidebar() {
     saturation?: number
   }>({ params: {} })
   const [panelHeight, setPanelHeight] = useState<number | null>(null)
+  const [depthEstimation, setDepthEstimation] = useState<{
+    label: string
+    layerId: string
+  } | null>(null)
   const viewResizeObserverRef = useRef<ResizeObserver | null>(null)
+  const replaceImageInputRef = useRef<HTMLInputElement | null>(null)
+  const replaceImageLayerIdRef = useRef<string | null>(null)
+  const depthMapInputRef = useRef<HTMLInputElement | null>(null)
+  const depthMapLayerIdRef = useRef<string | null>(null)
+  const replaceModelInputRef = useRef<HTMLInputElement | null>(null)
+  const replaceModelLayerIdRef = useRef<string | null>(null)
+  const environmentInputRef = useRef<HTMLInputElement | null>(null)
+  const environmentLayerIdRef = useRef<string | null>(null)
   const rightSidebarVisible = useEditorStore((state) => state.sidebars.right)
   const mobilePanel = useEditorStore((state) => state.mobilePanel)
   const sidebarView = useEditorStore((state) => state.sidebarView)
@@ -59,6 +98,7 @@ export function PropertiesSidebar() {
   )
   const endInteractiveEdit = useEditorStore((state) => state.endInteractiveEdit)
   const selectedLayerId = useLayerStore((state) => state.selectedLayerId)
+  const hasLayers = useLayerStore((state) => state.layers.length > 0)
   const selectedLayer = useLayerStore((state) => {
     if (!selectedLayerId) return null
     return state.layers.find((layer) => layer.id === selectedLayerId) ?? null
@@ -68,6 +108,7 @@ export function PropertiesSidebar() {
     (state) => state.setLayerCompositeMode
   )
   const setLayerMaskConfig = useLayerStore((state) => state.setLayerMaskConfig)
+  const setLayerMask = useLayerStore((state) => state.setLayerMask)
   const setLayerHue = useLayerStore((state) => state.setLayerHue)
   const setLayerOpacity = useLayerStore((state) => state.setLayerOpacity)
   const randomizeGradientParams = useLayerStore(
@@ -75,10 +116,24 @@ export function PropertiesSidebar() {
   )
   const setLayerSaturation = useLayerStore((state) => state.setLayerSaturation)
   const updateLayerParam = useLayerStore((state) => state.updateLayerParam)
-  const currentTime = useTimelineStore((state) => state.currentTime)
+  const setLayerAsset = useLayerStore((state) => state.setLayerAsset)
+  const setLayerDepthAsset = useLayerStore(
+    (state) => state.setLayerDepthAsset
+  )
+  const setLayerEnvironmentAsset = useLayerStore(
+    (state) => state.setLayerEnvironmentAsset
+  )
+  const setLayerRuntimeError = useLayerStore(
+    (state) => state.setLayerRuntimeError
+  )
+  const seedDurationFromMedia = useTimelineStore(
+    (state) => state.seedDurationFromMedia
+  )
   const timelineTracks = useTimelineStore((state) => state.tracks)
   const upsertKeyframe = useTimelineStore((state) => state.upsertKeyframe)
   const assets = useAssetStore((state) => state.assets)
+  const loadAsset = useAssetStore((state) => state.loadAsset)
+  const removeAsset = useAssetStore((state) => state.removeAsset)
   const activeGestureDepthRef = useRef(0)
   const activeGestureTimeRef = useRef<number | null>(null)
   const mobilePanelVisible =
@@ -107,9 +162,22 @@ export function PropertiesSidebar() {
   const selectedAsset = selectedLayer
     ? getSelectedAsset(assetById, selectedLayer.assetId)
     : null
+  const selectedDepthAsset = selectedLayer
+    ? getSelectedAsset(assetById, selectedLayer.depthAssetId ?? null)
+    : null
+  const selectedEnvironmentAsset = selectedLayer
+    ? getSelectedAsset(assetById, selectedLayer.environmentAssetId ?? null)
+    : null
   const selectedDefinition = selectedLayer
     ? getLayerDefinition(selectedLayer.type)
     : null
+  const modelClips = useModelClips(
+    selectedLayer?.type === "model" &&
+      selectedAsset?.kind === "model" &&
+      !isSvgMediaSource(selectedAsset)
+      ? selectedAsset.url
+      : null
+  )
   const selectedVisibleParams = useMemo(() => {
     if (!(selectedLayer && selectedDefinition)) {
       return [] as ParameterDefinition[]
@@ -129,6 +197,10 @@ export function PropertiesSidebar() {
         return false
       }
 
+      if (param.group === "Depth" && !selectedLayer.depthAssetId) {
+        return false
+      }
+
       return isParamVisible(
         param,
         selectedLayer.params,
@@ -145,6 +217,10 @@ export function PropertiesSidebar() {
         : [],
     [selectedLayer, timelineTracks]
   )
+
+  const showsAnimatedValues =
+    timelinePanelOpen && selectedLayerTracks.length > 0
+  const currentTime = useDisplayedTimelineTime(showsAnimatedValues)
 
   const evaluatedSelectedLayer = useMemo(() => {
     if (
@@ -316,12 +392,15 @@ export function PropertiesSidebar() {
     timelinePanelOpen,
   ])
 
-  const handleToggleParamGroup = useCallback((groupId: string) => {
-    setExpandedParamGroups((current) => ({
-      ...current,
-      [groupId]: !(current[groupId] ?? true),
-    }))
-  }, [])
+  const handleToggleParamGroup = useCallback(
+    (groupId: string, expanded: boolean) => {
+      setExpandedParamGroups((current) => ({
+        ...current,
+        [groupId]: expanded,
+      }))
+    },
+    []
+  )
 
   const handleTimelineKeyframe = useCallback(
     (
@@ -406,7 +485,9 @@ export function PropertiesSidebar() {
         upsertKeyframe({
           binding,
           layerId: selectedLayer.id,
-          time: activeGestureTimeRef.current ?? currentTime,
+          time:
+            activeGestureTimeRef.current ??
+            useTimelineStore.getState().currentTime,
           value,
         })
         return
@@ -414,13 +495,7 @@ export function PropertiesSidebar() {
 
       fallback()
     },
-    [
-      currentTime,
-      selectedLayer,
-      selectedLayerTracks,
-      timelineAutoKey,
-      upsertKeyframe,
-    ]
+    [selectedLayer, selectedLayerTracks, timelineAutoKey, upsertKeyframe]
   )
 
   const handleTimelineAwareParamChange = useCallback(
@@ -430,7 +505,17 @@ export function PropertiesSidebar() {
       }
 
       const definition =
-        selectedVisibleParams.find((param) => param.key === key) ?? null
+        selectedVisibleParams.find((param) => param.key === key) ??
+        (isMaskParamKey(key)
+          ? getMaskParameterDefinition(selectedLayer.mask?.shape ?? "none", key)
+          : null) ??
+        selectedDefinition?.params.find(
+          (param) =>
+            param.key === key &&
+            param.type === "text" &&
+            param.interpolate === "gradient"
+        ) ??
+        null
       const binding = definition ? createParamTimelineBinding(definition) : null
 
       if (
@@ -451,31 +536,430 @@ export function PropertiesSidebar() {
         upsertKeyframe({
           binding,
           layerId: selectedLayer.id,
-          time: activeGestureTimeRef.current ?? currentTime,
+          time:
+            activeGestureTimeRef.current ??
+            useTimelineStore.getState().currentTime,
           value,
         })
         return
       }
 
+      const maskField = maskFieldOf(key)
+      if (maskField) {
+        setLayerMask(
+          selectedLayer.id,
+          maskUpdatesFor(maskField, value, selectedLayer.mask ?? DEFAULT_LAYER_MASK)
+        )
+        return
+      }
+
       updateLayerParam(selectedLayer.id, key, value)
+
+      if (selectedLayer.type === "model" && key === "material") {
+        const defaults = modelMaterialDefaults(value)
+        if (defaults) {
+          updateLayerParam(selectedLayer.id, "materialColor", defaults.color)
+          updateLayerParam(
+            selectedLayer.id,
+            "materialRoughness",
+            defaults.roughness
+          )
+          updateLayerParam(
+            selectedLayer.id,
+            "materialMetalness",
+            defaults.metalness
+          )
+        }
+      }
+
+      if (selectedLayer.type === "photographic-cells" && key === "mode") {
+        const state = useLayerStore.getState()
+        const paint = useCellPaintStore.getState()
+        if (
+          value === "paint" &&
+          canPaintCellLayer(
+            state.layers,
+            selectedLayer.id,
+            state.selectedLayerId
+          )
+        ) {
+          paint.edit(selectedLayer.id)
+        } else if (paint.layerId === selectedLayer.id) {
+          paint.edit(null)
+        }
+      }
     },
     [
-      currentTime,
+      selectedDefinition,
       selectedLayer,
       selectedLayerTracks,
       selectedVisibleParams,
+      setLayerMask,
       timelineAutoKey,
       updateLayerParam,
       upsertKeyframe,
     ]
   )
 
+  const handleSetLayerHue = useCallback(
+    (id: string, value: number) => {
+      handleTimelineAwareLayerAdjustment(
+        createLayerPropertyBinding("hue"),
+        value,
+        () => setLayerHue(id, value)
+      )
+    },
+    [handleTimelineAwareLayerAdjustment, setLayerHue]
+  )
+
+  const handleSetLayerOpacity = useCallback(
+    (id: string, value: number) => {
+      handleTimelineAwareLayerAdjustment(
+        createLayerPropertyBinding("opacity"),
+        value,
+        () => setLayerOpacity(id, value)
+      )
+    },
+    [handleTimelineAwareLayerAdjustment, setLayerOpacity]
+  )
+
+  const handleSetLayerSaturation = useCallback(
+    (id: string, value: number) => {
+      handleTimelineAwareLayerAdjustment(
+        createLayerPropertyBinding("saturation"),
+        value,
+        () => setLayerSaturation(id, value)
+      )
+    },
+    [handleTimelineAwareLayerAdjustment, setLayerSaturation]
+  )
+
+  const handleUpdateLayerParam = useCallback(
+    (id: string, key: string, value: ParameterValue) => {
+      if (id === selectedLayerId) {
+        handleTimelineAwareParamChange(key, value)
+      }
+    },
+    [handleTimelineAwareParamChange, selectedLayerId]
+  )
+
+  const handleReplaceImagePick = useCallback(() => {
+    if (!selectedLayerId) {
+      return
+    }
+
+    replaceImageLayerIdRef.current = selectedLayerId
+    replaceImageInputRef.current?.click()
+  }, [selectedLayerId])
+
+  const handleReplaceImageChange = useCallback(
+    async (event: ChangeEvent<HTMLInputElement>) => {
+      const file = event.target.files?.[0]
+      const layerId = replaceImageLayerIdRef.current
+
+      event.currentTarget.value = ""
+      replaceImageLayerIdRef.current = null
+
+      if (!(file && layerId)) {
+        return
+      }
+
+      if (inferFileAssetKind(file) !== "image") {
+        setLayerRuntimeError(layerId, "Expected an image file.")
+
+        return
+      }
+
+      try {
+        const asset = await loadAsset(file)
+
+        if (asset.kind !== "image") {
+          removeAsset(asset.id)
+          setLayerRuntimeError(layerId, "Expected an image file.")
+
+          return
+        }
+
+        setLayerAsset(layerId, asset.id)
+        setLayerRuntimeError(layerId, null)
+      } catch (error) {
+        setLayerRuntimeError(
+          layerId,
+          error instanceof Error ? error.message : "Failed to replace image."
+        )
+      }
+    },
+    [loadAsset, removeAsset, setLayerAsset, setLayerRuntimeError]
+  )
+
+  const handleReplaceModelPick = useCallback(() => {
+    if (!selectedLayerId) {
+      return
+    }
+
+    replaceModelLayerIdRef.current = selectedLayerId
+    replaceModelInputRef.current?.click()
+  }, [selectedLayerId])
+
+  const handleReplaceModelChange = useCallback(
+    async (event: ChangeEvent<HTMLInputElement>) => {
+      const file = event.target.files?.[0]
+      const layerId = replaceModelLayerIdRef.current
+
+      event.currentTarget.value = ""
+      replaceModelLayerIdRef.current = null
+
+      if (!(file && layerId)) {
+        return
+      }
+
+      if (!(inferFileAssetKind(file) === "model" || isSvgMediaSource({ fileName: file.name, mimeType: file.type }))) {
+        setLayerRuntimeError(layerId, "Expected a .glb, .gltf or .svg file.")
+
+        return
+      }
+
+      try {
+        const asset = await loadAsset(file, { kind: "model" })
+
+        if (asset.kind !== "model") {
+          removeAsset(asset.id)
+          setLayerRuntimeError(layerId, "Expected a .glb, .gltf or .svg file.")
+
+          return
+        }
+
+        setLayerAsset(layerId, asset.id)
+        seedDurationFromMedia(getSeedableMediaDuration(asset))
+      } catch (error) {
+        setLayerRuntimeError(
+          layerId,
+          error instanceof Error ? error.message : "Failed to replace model."
+        )
+      }
+    },
+    [
+      loadAsset,
+      removeAsset,
+      seedDurationFromMedia,
+      setLayerAsset,
+      setLayerRuntimeError,
+    ]
+  )
+
+  const handleEnvironmentPick = useCallback(() => {
+    if (!selectedLayerId) {
+      return
+    }
+
+    environmentLayerIdRef.current = selectedLayerId
+    environmentInputRef.current?.click()
+  }, [selectedLayerId])
+
+  const handleEnvironmentChange = useCallback(
+    async (event: ChangeEvent<HTMLInputElement>) => {
+      const file = event.target.files?.[0]
+      const layerId = environmentLayerIdRef.current
+
+      event.currentTarget.value = ""
+      environmentLayerIdRef.current = null
+
+      if (!(file && layerId)) {
+        return
+      }
+
+      if (inferFileAssetKind(file) !== "environment") {
+        setLayerRuntimeError(layerId, "Expected an .hdr file.")
+
+        return
+      }
+
+      try {
+        const asset = await loadAsset(file)
+
+        if (asset.kind !== "environment") {
+          removeAsset(asset.id)
+          setLayerRuntimeError(layerId, "Expected an .hdr file.")
+
+          return
+        }
+
+        setLayerEnvironmentAsset(layerId, asset.id)
+        updateLayerParam(layerId, "environment", CUSTOM_MODEL_ENVIRONMENT)
+      } catch (error) {
+        setLayerRuntimeError(
+          layerId,
+          error instanceof Error ? error.message : "Failed to load the .hdr."
+        )
+      }
+    },
+    [
+      loadAsset,
+      removeAsset,
+      setLayerEnvironmentAsset,
+      setLayerRuntimeError,
+      updateLayerParam,
+    ]
+  )
+
+  const handleRemoveEnvironment = useCallback(() => {
+    if (!selectedLayer) {
+      return
+    }
+
+    setLayerEnvironmentAsset(selectedLayer.id, null)
+
+    if (selectedLayer.params.environment === CUSTOM_MODEL_ENVIRONMENT) {
+      updateLayerParam(
+        selectedLayer.id,
+        "environment",
+        DEFAULT_MODEL_ENVIRONMENT.id
+      )
+    }
+  }, [selectedLayer, setLayerEnvironmentAsset, updateLayerParam])
+
+  const handleDepthMapPick = useCallback(() => {
+    if (!selectedLayerId) {
+      return
+    }
+
+    depthMapLayerIdRef.current = selectedLayerId
+    depthMapInputRef.current?.click()
+  }, [selectedLayerId])
+
+  const handleDepthMapChange = useCallback(
+    async (event: ChangeEvent<HTMLInputElement>) => {
+      const file = event.target.files?.[0]
+      const layerId = depthMapLayerIdRef.current
+
+      event.currentTarget.value = ""
+      depthMapLayerIdRef.current = null
+
+      if (!(file && layerId)) {
+        return
+      }
+
+      if (inferFileAssetKind(file) !== "image") {
+        setLayerRuntimeError(layerId, "Expected an image file for the depth map.")
+
+        return
+      }
+
+      try {
+        const asset = await loadAsset(file)
+
+        if (asset.kind !== "image") {
+          removeAsset(asset.id)
+          setLayerRuntimeError(
+            layerId,
+            "Expected an image file for the depth map."
+          )
+
+          return
+        }
+
+        setLayerDepthAsset(layerId, asset.id)
+      } catch (error) {
+        setLayerRuntimeError(
+          layerId,
+          error instanceof Error ? error.message : "Failed to load depth map."
+        )
+      }
+    },
+    [loadAsset, removeAsset, setLayerDepthAsset, setLayerRuntimeError]
+  )
+
+  const handleEstimateDepthMap = useCallback(async () => {
+    if (!(selectedLayer && selectedAsset && selectedAsset.kind === "image")) {
+      return
+    }
+
+    const layerId = selectedLayer.id
+    const source = selectedAsset
+    setDepthEstimation({ label: "Loading depth model…", layerId })
+
+    try {
+      const result = await estimateDepthMap({
+        height: source.height ?? 0,
+        onProgress: (progress) =>
+          setDepthEstimation({ label: describeDepthProgress(progress), layerId }),
+        url: source.url,
+        width: source.width ?? 0,
+      })
+      const baseName = source.fileName.replace(/\.[^.]+$/, "") || "image"
+      const asset = await loadAsset(
+        new File([result.blob], `${baseName}-depth.png`, { type: "image/png" })
+      )
+      setLayerDepthAsset(layerId, asset.id)
+      updateLayerParam(layerId, "depthInvert", false)
+      setLayerRuntimeError(layerId, null)
+    } catch (error) {
+      if (!(error instanceof DOMException && error.name === "AbortError")) {
+        setLayerRuntimeError(
+          layerId,
+          error instanceof Error ? error.message : "Depth estimation failed."
+        )
+      }
+    } finally {
+      setDepthEstimation((current) =>
+        current?.layerId === layerId ? null : current
+      )
+    }
+  }, [
+    loadAsset,
+    selectedAsset,
+    selectedLayer,
+    setLayerDepthAsset,
+    setLayerRuntimeError,
+    updateLayerParam,
+  ])
+
+  const handleRemoveDepthMap = useCallback(() => {
+    if (!selectedLayerId) {
+      return
+    }
+
+    setLayerDepthAsset(selectedLayerId, null)
+  }, [selectedLayerId, setLayerDepthAsset])
+
   const selectedLayerContentProps = selectedLayer
     ? {
+        canEstimateDepthMap: Boolean(
+          selectedAsset &&
+            selectedAsset.kind === "image" &&
+            !isSvgMediaSource({
+              fileName: selectedAsset.fileName,
+              mimeType: selectedAsset.mimeType,
+            })
+        ),
+        depthEstimationLabel:
+          depthEstimation?.layerId === selectedLayer.id
+            ? depthEstimation.label
+            : null,
+        depthMapFileName: selectedDepthAsset?.fileName ?? null,
+        hasDepthMap: Boolean(selectedLayer.depthAssetId),
+        modelClips,
+        modelEnvironmentFileName: selectedEnvironmentAsset?.fileName ?? null,
+        modelSvgSource: Boolean(
+          selectedAsset?.kind === "model" && isSvgMediaSource(selectedAsset)
+        ),
+        onAttachEnvironment: handleEnvironmentPick,
+        onRemoveEnvironment: handleRemoveEnvironment,
+        onReplaceModel: handleReplaceModelPick,
+        onAttachDepthMap: handleDepthMapPick,
+        onEstimateDepthMap: handleEstimateDepthMap,
+        onRemoveDepthMap: handleRemoveDepthMap,
         blendMode: selectedLayer.blendMode,
         compositeMode: selectedLayer.compositeMode,
         maskConfig: selectedLayer.maskConfig,
         setLayerMaskConfig,
+        mask: applyMaskOverrides(
+          selectedLayer.mask ?? null,
+          displayedLayerState?.params ?? selectedLayer.params
+        ),
+        maskInGroup: !!selectedLayer.parentId,
+        maskLayerKind: selectedLayer.kind,
+        setLayerMask,
         definitionName: selectedDefinition?.defaultName ?? selectedLayer.type,
         expandedParamGroups,
         hue: displayedLayerState?.hue ?? selectedLayer.hue,
@@ -492,6 +976,7 @@ export function PropertiesSidebar() {
             ? selectedLayer.params.sourceFileName
             : ""),
         layerType: selectedLayer.type,
+        onReplaceImage: handleReplaceImagePick,
         onToggleParamGroup: handleToggleParamGroup,
         onTimelineKeyframe: handleTimelineKeyframe,
         opacity: displayedLayerState?.opacity ?? selectedLayer.opacity,
@@ -500,30 +985,11 @@ export function PropertiesSidebar() {
         saturation: displayedLayerState?.saturation ?? selectedLayer.saturation,
         setLayerBlendMode,
         setLayerCompositeMode,
-        setLayerHue: (id: string, value: number) =>
-          handleTimelineAwareLayerAdjustment(
-            createLayerPropertyBinding("hue"),
-            value,
-            () => setLayerHue(id, value)
-          ),
-        setLayerOpacity: (id: string, value: number) =>
-          handleTimelineAwareLayerAdjustment(
-            createLayerPropertyBinding("opacity"),
-            value,
-            () => setLayerOpacity(id, value)
-          ),
-        setLayerSaturation: (id: string, value: number) =>
-          handleTimelineAwareLayerAdjustment(
-            createLayerPropertyBinding("saturation"),
-            value,
-            () => setLayerSaturation(id, value)
-          ),
+        setLayerHue: handleSetLayerHue,
+        setLayerOpacity: handleSetLayerOpacity,
+        setLayerSaturation: handleSetLayerSaturation,
         timelinePanelOpen,
-        updateLayerParam: (id: string, key: string, value: ParameterValue) => {
-          if (id === selectedLayer.id) {
-            handleTimelineAwareParamChange(key, value)
-          }
-        },
+        updateLayerParam: handleUpdateLayerParam,
         values: displayedLayerState?.params ?? selectedLayer.params,
         visibleParams: selectedVisibleParams,
       }
@@ -577,23 +1043,50 @@ export function PropertiesSidebar() {
     )
   }
 
+  if (!hasLayers && sidebarView !== "scene") {
+    return null
+  }
+
   return (
     <>
+      <input
+        accept={getAssetAccept("image")}
+        className="hidden"
+        onChange={handleReplaceImageChange}
+        ref={replaceImageInputRef}
+        type="file"
+      />
+      <input
+        accept={getAssetAccept("image")}
+        className="hidden"
+        data-testid="depth-map-input"
+        onChange={handleDepthMapChange}
+        ref={depthMapInputRef}
+        type="file"
+      />
+      <input
+        accept={getAssetAccept("model")}
+        className="hidden"
+        data-testid="replace-model-input"
+        onChange={handleReplaceModelChange}
+        ref={replaceModelInputRef}
+        type="file"
+      />
+      <input
+        accept={getAssetAccept("environment")}
+        className="hidden"
+        data-testid="environment-input"
+        onChange={handleEnvironmentChange}
+        ref={environmentInputRef}
+        type="file"
+      />
+
       <aside
         className={cn(
           "pointer-events-none fixed right-3 bottom-[88px] left-3 z-45 translate-y-0 transition-[opacity,translate] duration-[220ms,260ms] ease-[ease-out,cubic-bezier(0.22,1,0.36,1)] min-[900px]:hidden",
           !mobilePanelVisible && "translate-y-3 opacity-0"
         )}
       >
-        <div
-          aria-hidden="true"
-          className="pointer-events-none invisible absolute top-0 left-0 -z-1 w-full"
-        >
-          <div className="w-full" ref={bindMeasuredView}>
-            {renderInvisibleContent()}
-          </div>
-        </div>
-
         <motion.div
           className={cn(
             "pointer-events-auto overflow-hidden rounded-[var(--ds-radius-panel)] max-h-[min(60vh,520px)] w-full",
@@ -618,10 +1111,12 @@ export function PropertiesSidebar() {
 
       <div
         aria-hidden="true"
-        className="pointer-events-none invisible absolute top-0 left-0 -z-1 hidden w-full min-[900px]:block"
+        className="pointer-events-none invisible absolute top-0 left-0 -z-1 w-[calc(100vw-24px)] min-[900px]:w-[300px]"
       >
         <div className="w-full" ref={bindMeasuredView}>
-          {renderInvisibleContent()}
+          <MeasuringLayoutProvider>
+            {renderInvisibleContent()}
+          </MeasuringLayoutProvider>
         </div>
       </div>
 
@@ -639,17 +1134,18 @@ export function PropertiesSidebar() {
               initial={false}
               {...(panelHeight === null
                 ? {}
-                : { animate: { height: panelHeight } })}
+                : { animate: { height: panelHeight + 40 } })}
               transition={heightTransition}
             >
               <GlassPanel
                 className="flex h-full min-h-0 flex-col gap-0 p-0"
                 variant="panel"
               >
-                <div className="flex items-center justify-start gap-2 border-b border-[var(--ds-border-divider)] px-3 py-1.5">
+                <div className="flex h-10 shrink-0 items-center justify-start gap-2 border-b border-[var(--ds-border-divider)] px-3">
                   <div className="inline-flex items-center gap-2">
                     <IconButton
                       aria-label="Move properties panel"
+                      tooltipDisabled
                       className="h-7 w-7 cursor-grab text-[var(--ds-color-text-muted)] active:cursor-grabbing"
                       variant="ghost"
                       {...dragHandleProps}

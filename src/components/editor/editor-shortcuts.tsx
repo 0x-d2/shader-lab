@@ -2,21 +2,13 @@
 
 import { useEffect, useEffectEvent } from "react"
 import { playUISound } from "@/lib/audio/shader-lab-sounds"
+import { requestDraftSave } from "@/lib/editor/draft-save-bus"
+import { duplicateLayers } from "@/lib/editor/duplicate-layers"
+import { isEditableTarget } from "@/lib/editor/is-editable-target"
+import { toggleLayoutGrid } from "@/lib/editor/layout-grid"
 import { useEditorStore } from "@/store/editor-store"
 import { useLayerStore } from "@/store/layer-store"
 import { useTimelineStore } from "@/store/timeline-store"
-
-function isEditableTarget(target: EventTarget | null): boolean {
-  if (!(target instanceof HTMLElement)) {
-    return false
-  }
-
-  if (target.isContentEditable) {
-    return true
-  }
-
-  return ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName)
-}
 
 export function EditorShortcuts() {
   const selectedLayerIds = useLayerStore((state) => state.selectedLayerIds)
@@ -40,6 +32,42 @@ export function EditorShortcuts() {
     }
 
     if (
+      (event.metaKey || event.ctrlKey) &&
+      !event.altKey &&
+      event.key.toLowerCase() === "g"
+    ) {
+      event.preventDefault()
+      const state = useLayerStore.getState()
+      if (event.shiftKey) {
+        for (const id of state.selectedLayerIds) state.ungroupLayer(id)
+      } else {
+        state.groupLayers(state.selectedLayerIds)
+      }
+      return
+    }
+
+    if (
+      event.shiftKey &&
+      !(event.metaKey || event.ctrlKey || event.altKey) &&
+      event.code === "KeyG"
+    ) {
+      event.preventDefault()
+      toggleLayoutGrid()
+      return
+    }
+
+    if (
+      (event.metaKey || event.ctrlKey) &&
+      !event.altKey &&
+      event.key.toLowerCase() === "s"
+    ) {
+      event.preventDefault()
+      requestDraftSave({ asNewDraft: event.shiftKey })
+
+      return
+    }
+
+    if (
       event.metaKey &&
       !event.altKey &&
       !event.ctrlKey &&
@@ -53,6 +81,18 @@ export function EditorShortcuts() {
         enterImmersiveCanvas()
         playUISound("action.hideUI")
       }
+
+      return
+    }
+
+    if (
+      (event.metaKey || event.ctrlKey) &&
+      !event.altKey &&
+      event.key.toLowerCase() === "d" &&
+      selectedLayerIds.length > 0
+    ) {
+      event.preventDefault()
+      duplicateLayers(selectedLayerIds)
 
       return
     }

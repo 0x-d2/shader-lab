@@ -1,5 +1,6 @@
+import { getBlankSceneConfig } from "@/lib/editor/blank-project"
+import { resolveCompositionUpdate } from "@/lib/editor/composition"
 import { create } from "zustand"
-import { getDefaultProjectComposition } from "@/lib/editor/default-project"
 import { DEFAULT_CANVAS_SIZE } from "@/lib/editor/layers"
 import type { EditorRenderer } from "@/renderer/contracts"
 import type {
@@ -9,10 +10,8 @@ import type {
   SceneConfig,
   SidebarView,
   WebGPUStatus,
+  CompositionAspect,
 } from "@/types/editor"
-import { DEFAULT_SCENE_CONFIG } from "@/types/editor"
-
-const DEFAULT_PROJECT_COMPOSITION = getDefaultProjectComposition()
 
 export interface EditorStoreState extends EditorStateSnapshot {
   activeFloatingPanelDrag:
@@ -35,11 +34,15 @@ export interface EditorStoreState extends EditorStateSnapshot {
   liveRenderer: EditorRenderer | null
   liveCanvas: HTMLCanvasElement | null
   mobilePanel: MobileEditorPanel
+  pendingSceneSlug: string | null
+  // Bumped on a wholesale scene swap, so the renderer re-gates its reveal.
+  sceneRevision: number
   startupPreviewDismissed: boolean
 }
 
 export interface EditorStoreActions {
   beginInteractiveEdit: () => void
+  clearPendingScene: () => void
   closeTimelinePanel: () => void
   dismissStartupPreview: () => void
   endInteractiveEdit: () => void
@@ -48,6 +51,7 @@ export interface EditorStoreActions {
   focusFloatingPanel: (
     panel: "layers" | "properties" | "timeline" | "topbar"
   ) => void
+  noteSceneReplaced: () => void
   openTimelinePanel: () => void
   resetFloatingPanels: () => void
   resetView: () => void
@@ -63,6 +67,7 @@ export interface EditorStoreActions {
   setImmersiveCanvas: (immersiveCanvas: boolean) => void
   setOutputSize: (width: number, height: number) => void
   setPan: (x: number, y: number) => void
+  setPendingScene: (slug: string) => void
   setRenderScale: (scale: RenderScale) => void
   setSidebarOpen: (side: "left" | "right", open: boolean) => void
   setTheme: (theme: "dark" | "light") => void
@@ -79,6 +84,11 @@ export interface EditorStoreActions {
   toggleTimelinePanel: () => void
   toggleSidebar: (side: "left" | "right") => void
   updateSceneConfig: (updates: Partial<SceneConfig>) => void
+  setComposition: (updates: {
+    aspect?: CompositionAspect
+    width?: number
+    height?: number
+  }) => void
 }
 
 export type EditorStore = EditorStoreState & EditorStoreActions
@@ -112,10 +122,10 @@ export const useEditorStore = create<EditorStore>((set) => ({
   liveRenderer: null,
   liveCanvas: null,
   mobilePanel: "none",
-  outputSize: DEFAULT_PROJECT_COMPOSITION,
+  outputSize: { ...DEFAULT_CANVAS_SIZE },
   panOffset: { x: 0, y: 0 },
   renderScale: 1,
-  sceneConfig: DEFAULT_SCENE_CONFIG,
+  sceneConfig: getBlankSceneConfig(),
   sidebars: {
     left: true,
     right: true,
@@ -127,7 +137,23 @@ export const useEditorStore = create<EditorStore>((set) => ({
   webgpuError: null,
   webgpuStatus: "idle",
   zoom: 1,
+  pendingSceneSlug: null,
+  sceneRevision: 0,
   startupPreviewDismissed: false,
+
+  noteSceneReplaced: () => {
+    set((state) => ({ sceneRevision: state.sceneRevision + 1 }))
+  },
+
+  clearPendingScene: () => {
+    set((state) =>
+      state.pendingSceneSlug === null ? state : { pendingSceneSlug: null }
+    )
+  },
+
+  setPendingScene: (pendingSceneSlug) => {
+    set({ pendingSceneSlug })
+  },
 
   dismissStartupPreview: () => {
     set((state) =>
@@ -385,6 +411,12 @@ export const useEditorStore = create<EditorStore>((set) => ({
     set((state) => ({
       sceneConfig: { ...state.sceneConfig, ...updates },
     }))
+  },
+
+  setComposition: (updates) => {
+    set((state) =>
+      resolveCompositionUpdate(state.sceneConfig, state.outputSize, updates)
+    )
   },
 
   setLiveRenderer: (liveRenderer) => {

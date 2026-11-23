@@ -1,6 +1,11 @@
 "use client"
 
 import { useCallback } from "react"
+import {
+  hasSceneAdjustments,
+  neutralSceneAdjustments,
+} from "@/lib/editor/scene-adjustments"
+import { Button } from "@/components/ui/button"
 import { ChannelMixerMatrix } from "@/components/ui/channel-mixer-matrix"
 import { ColorPicker } from "@/components/ui/color-picker"
 import { ColorCurvesEditor } from "@/components/ui/color-curves"
@@ -12,11 +17,21 @@ import { Toggle } from "@/components/ui/toggle"
 import { Typography } from "@/components/ui/typography"
 import { playUISound } from "@/lib/audio/shader-lab-sounds"
 import { useEditorStore } from "@/store/editor-store"
-import type { CompositionAspect, SceneConfig } from "@/types/editor"
+import type {
+  CompositionAspect,
+  RenderScale,
+  SceneConfig,
+} from "@/types/editor"
+import { getDocumentSize } from "@/lib/editor/composition"
+import {
+  MAX_GRID_TRACKS,
+  resolveLayoutGrid,
+  updateLayoutGrid,
+} from "@/lib/editor/layout-grid"
 import { COMPOSITION_ASPECTS, DEFAULT_SCENE_CONFIG } from "@/types/editor"
 
 const ASPECT_LABELS: Partial<Record<string, string>> = {
-  screen: "Screen",
+  screen: "Screen (adaptive)",
   custom: "Custom",
 }
 
@@ -24,6 +39,12 @@ const aspectOptions = COMPOSITION_ASPECTS.map((aspect) => ({
   label: ASPECT_LABELS[aspect] ?? aspect,
   value: aspect,
 }))
+
+const renderScaleOptions = [
+  { label: "Quality", value: "1" },
+  { label: "Balanced", value: "0.75" },
+  { label: "Performance", value: "0.5" },
+]
 
 const inputClassName =
   "h-7 w-14 rounded-[var(--ds-radius-control)] border border-[var(--ds-border-divider)] bg-[var(--ds-color-surface-control)] px-2 text-center font-[var(--ds-font-mono)] text-[11px] leading-4 text-[var(--ds-color-text-primary)] outline-none focus:border-[var(--ds-border-active)]"
@@ -71,6 +92,12 @@ function Row({
 export function SceneConfigContent() {
   const sceneConfig = useEditorStore((state) => state.sceneConfig)
   const updateSceneConfig = useEditorStore((state) => state.updateSceneConfig)
+  const renderScale = useEditorStore((state) => state.renderScale)
+  const setRenderScale = useEditorStore((state) => state.setRenderScale)
+  const setComposition = useEditorStore((state) => state.setComposition)
+  const outputSize = useEditorStore((state) => state.outputSize)
+  const documentSize = getDocumentSize(sceneConfig, outputSize)
+  const grid = resolveLayoutGrid(sceneConfig)
 
   const handleUpdate = useCallback(
     <K extends keyof SceneConfig>(key: K, value: SceneConfig[K]) => {
@@ -87,51 +114,155 @@ export function SceneConfigContent() {
   )
 
   return (
-    <div className="flex min-h-0 max-h-[min(62vh,620px)] flex-col gap-0 overflow-x-hidden overflow-y-auto">
+    <div
+      className="flex min-h-0 max-h-[min(62vh,620px)] flex-col gap-0 overflow-x-hidden overflow-y-auto"
+      data-ds="panel-scroll"
+    >
+      <section
+        className="flex flex-col gap-2 px-4 py-3"
+        aria-label="Global color adjustments"
+      >
+        <Typography tone="secondary" variant="label">
+          {hasSceneAdjustments(sceneConfig)
+            ? "Global colors active"
+            : "Global colors neutral"}
+        </Typography>
+        <Typography tone="muted" variant="caption">
+          These adjustments affect the entire composition.
+        </Typography>
+        <Button
+          disabled={!hasSceneAdjustments(sceneConfig)}
+          onClick={() => updateSceneConfig(neutralSceneAdjustments())}
+          size="compact"
+          variant="secondary"
+        >
+          Reset all global colors
+        </Button>
+      </section>
       {/* Composition */}
       <Section title="Composition">
         <Row label="Aspect">
           <Select
             onValueChange={(value) =>
-              handleUpdate("compositionAspect", value as CompositionAspect)
+              setComposition({ aspect: value as CompositionAspect })
             }
             options={aspectOptions}
             value={sceneConfig.compositionAspect}
           />
         </Row>
-        {sceneConfig.compositionAspect === "custom" && (
-          <div className="flex items-center justify-end gap-1.5">
-            <NumberInput
-              className={inputClassName}
-              min={1}
-              onChange={(value) =>
-                handleUpdate("compositionWidth", Math.round(value))
-              }
-              parseValue={(value) => {
-                const nextValue = Number.parseInt(value, 10)
-                return Number.isFinite(nextValue) ? nextValue : null
-              }}
-              step={1}
-              value={sceneConfig.compositionWidth}
-            />
-            <Typography tone="muted" variant="monoXs">
-              :
-            </Typography>
-            <NumberInput
-              className={inputClassName}
-              min={1}
-              onChange={(value) =>
-                handleUpdate("compositionHeight", Math.round(value))
-              }
-              parseValue={(value) => {
-                const nextValue = Number.parseInt(value, 10)
-                return Number.isFinite(nextValue) ? nextValue : null
-              }}
-              step={1}
-              value={sceneConfig.compositionHeight}
-            />
-          </div>
+        {documentSize && (
+          <Row label="Size">
+            <div className="flex items-center gap-1.5">
+              <NumberInput
+                aria-label="Artboard width"
+                className={inputClassName}
+                min={1}
+                onChange={(value) =>
+                  setComposition({ width: Math.round(value) })
+                }
+                parseValue={(value) => {
+                  const nextValue = Number.parseInt(value, 10)
+                  return Number.isFinite(nextValue) ? nextValue : null
+                }}
+                step={1}
+                value={documentSize.width}
+              />
+              <Typography tone="muted" variant="monoXs">
+                ×
+              </Typography>
+              <NumberInput
+                aria-label="Artboard height"
+                className={inputClassName}
+                min={1}
+                onChange={(value) =>
+                  setComposition({ height: Math.round(value) })
+                }
+                parseValue={(value) => {
+                  const nextValue = Number.parseInt(value, 10)
+                  return Number.isFinite(nextValue) ? nextValue : null
+                }}
+                step={1}
+                value={documentSize.height}
+              />
+            </div>
+          </Row>
         )}
+        <Typography tone="muted" variant="caption">
+          {documentSize
+            ? "Fixed artboard: framing, masks and text stay put when the window changes. Exports use this size."
+            : "Follows the window. Older scenes keep this adaptive behavior."}
+        </Typography>
+        <Row label="Preview">
+          <Select
+            onValueChange={(value) =>
+              setRenderScale(Number(value) as RenderScale)
+            }
+            options={renderScaleOptions}
+            value={String(renderScale)}
+          />
+        </Row>
+      </Section>
+
+      <Section title="Grid">
+        <Toggle
+          checked={grid.visible}
+          label="Show grid (Shift+G)"
+          onCheckedChange={(checked) => updateLayoutGrid({ visible: checked })}
+        />
+        <Row label="Columns">
+          <NumberInput
+            aria-label="Grid columns"
+            className={inputClassName}
+            max={MAX_GRID_TRACKS}
+            min={0}
+            onChange={(value) => updateLayoutGrid({ columns: Math.round(value) })}
+            step={1}
+            value={grid.columns}
+          />
+        </Row>
+        <Row label="Rows">
+          <NumberInput
+            aria-label="Grid rows"
+            className={inputClassName}
+            max={MAX_GRID_TRACKS}
+            min={0}
+            onChange={(value) => updateLayoutGrid({ rows: Math.round(value) })}
+            step={1}
+            value={grid.rows}
+          />
+        </Row>
+        <Row label="Gap">
+          <NumberInput
+            aria-label="Grid gap"
+            className={inputClassName}
+            min={0}
+            onChange={(value) => updateLayoutGrid({ gap: value })}
+            step={1}
+            value={grid.gap}
+          />
+        </Row>
+        <Row label="Margin">
+          <NumberInput
+            aria-label="Grid margin"
+            className={inputClassName}
+            min={0}
+            onChange={(value) => updateLayoutGrid({ margin: value })}
+            step={1}
+            value={grid.margin}
+          />
+        </Row>
+        <Slider
+          label="Opacity"
+          max={100}
+          min={0}
+          onValueChange={(value) => updateLayoutGrid({ opacity: value / 100 })}
+          step={1}
+          value={Math.round(grid.opacity * 100)}
+          valueSuffix="%"
+        />
+        <Typography tone="muted" variant="caption">
+          A guide in document pixels. It is never part of the render or the export.
+        </Typography>
       </Section>
 
       {/* Background */}

@@ -8,55 +8,116 @@ import {
   useMemo,
   useRef,
   useState,
+  useSyncExternalStore,
 } from "react"
+import { CellPaintOverlay } from "./cell-paint-overlay"
+import { AnnotationHandlesOverlay } from "./annotation-handles-overlay"
+import { MaskHandlesOverlay } from "./mask-handles-overlay"
+import { ModelGizmoOverlay } from "./model-gizmo-overlay"
+import { ShapeHandlesOverlay } from "./shape-handles-overlay"
+import { TextEditOverlay } from "./text-edit-overlay"
+import { TextHandlesOverlay } from "./text-handles-overlay"
+import { MadeByBasement } from "@/components/editor/made-by-basement"
+import { useMobileCanvasFit } from "@/components/editor/use-mobile-canvas-fit"
 import { useEditorRenderer } from "@/hooks/use-editor-renderer"
+import { PlusIcon, StackIcon } from "@radix-ui/react-icons"
+import { requestLayerPicker } from "@/components/editor/layer-picker"
+import { Button } from "@/components/ui/button"
+import { Typography } from "@/components/ui/typography"
+import { cn } from "@/lib/cn"
+import {
+  isAutosaveReady,
+  subscribeAutosaveReady,
+} from "@/lib/editor/autosave/suppress"
+import {
+  BLANK_BACKGROUNDS,
+  LEGACY_BLANK_BACKGROUNDS,
+} from "@/lib/editor/blank-project"
+import { isLightColor } from "@/lib/editor/color-luminance"
+import { getDocumentSize } from "@/lib/editor/composition"
+import { isEditableTarget } from "@/lib/editor/is-editable-target"
 import { inferFileAssetKind } from "@/lib/editor/media-file"
+import {
+  isPreviewExporting,
+  subscribeToPreviewRenderLock,
+} from "@/lib/editor/preview-render-lock"
+import { getSeedableMediaDuration } from "@/lib/editor/timeline-duration"
 import {
   applyZoomAtPoint,
   clampZoom,
   getWheelZoomFactor,
 } from "@/lib/editor/view-transform"
-import { getCompositionFrame } from "@/lib/editor/composition"
 import { useAssetStore } from "@/store/asset-store"
+import { useCanvasHandlesStore } from "@/store/canvas-handles-store"
+import { useCellPaintStore } from "@/store/cell-paint-store"
+import { GradientPointsOverlay } from "@/components/editor/gradient-points-overlay"
+import { LayoutGridOverlay } from "@/components/editor/layout-grid-overlay"
 import { useEditorStore } from "@/store/editor-store"
 import { useLayerStore } from "@/store/layer-store"
+import { useTimelineStore } from "@/store/timeline-store"
+import { findTextLayerToEdit, useTextEditStore } from "@/store/text-edit-store"
+import { useThemeStore } from "@/store/theme-store"
 
 export function EditorCanvasViewport() {
-  const { canvasRef, isReady, viewportRef } = useEditorRenderer()
+  const { canvasRef, fallbackMessage, isReady, viewportRef } =
+    useEditorRenderer()
+
+  useMobileCanvasFit(viewportRef)
+  const exportingPreview = useSyncExternalStore(
+    subscribeToPreviewRenderLock,
+    isPreviewExporting,
+    () => false
+  )
   const immersiveCanvas = useEditorStore((state) => state.immersiveCanvas)
+  const handlesPeeking = useCanvasHandlesStore((state) => state.peeking)
+  const paintingCells = useCellPaintStore((state) => state.layerId !== null)
   const exitImmersiveCanvas = useEditorStore(
     (state) => state.exitImmersiveCanvas
   )
   const panOffset = useEditorStore((state) => state.panOffset)
+  const pendingSceneSlug = useEditorStore((state) => state.pendingSceneSlug)
   const zoom = useEditorStore((state) => state.zoom)
   const sceneConfig = useEditorStore((state) => state.sceneConfig)
   const canvasSize = useEditorStore((state) => state.canvasSize)
 
-  const compositionOverlay = useMemo(() => {
-    if (canvasSize.width === 0 || canvasSize.height === 0) return null
-
-    const frame = getCompositionFrame(sceneConfig, canvasSize)
-
-    if (
-      frame.x === 0 &&
-      frame.y === 0 &&
-      frame.width === canvasSize.width &&
-      frame.height === canvasSize.height
-    ) {
-      return null
-    }
-
-    return {
-      heightPercent: (frame.height / canvasSize.height) * 100,
-      widthPercent: (frame.width / canvasSize.width) * 100,
-    }
-  }, [canvasSize, sceneConfig])
+  const outputSize = useEditorStore((state) => state.outputSize)
+  const fixedArtboard = useMemo(
+    () => getDocumentSize(sceneConfig, outputSize) !== null,
+    [sceneConfig, outputSize]
+  )
 
   const [isDragOver, setIsDragOver] = useState(false)
   const [isSpacePressed, setIsSpacePressed] = useState(false)
   const [isPointerPanning, setIsPointerPanning] = useState(false)
+  const isEmpty = useLayerStore((state) => state.layers.length === 0)
+  const theme = useThemeStore((state) => state.theme)
+  const autosaveReady = useSyncExternalStore(
+    subscribeAutosaveReady,
+    isAutosaveReady,
+    () => false
+  )
+
+  useEffect(() => {
+    if (!(isEmpty && autosaveReady)) {
+      return
+    }
+    const other = theme === "light" ? "dark" : "light"
+    const { sceneConfig: current, updateSceneConfig } =
+      useEditorStore.getState()
+    const background = current.backgroundColor.toLowerCase()
+    const isOtherDefault =
+      background === BLANK_BACKGROUNDS[other] ||
+      (theme === "light" &&
+        (LEGACY_BLANK_BACKGROUNDS as readonly string[]).includes(background))
+    if (isOtherDefault) {
+      updateSceneConfig({ backgroundColor: BLANK_BACKGROUNDS[theme] })
+    }
+  }, [autosaveReady, isEmpty, theme])
   const addLayer = useLayerStore((state) => state.addLayer)
   const setLayerAsset = useLayerStore((state) => state.setLayerAsset)
+  const seedDurationFromMedia = useTimelineStore(
+    (state) => state.seedDurationFromMedia
+  )
   const loadAsset = useAssetStore((state) => state.loadAsset)
   const pointerPanRef = useRef<{
     pointerId: number
@@ -94,30 +155,32 @@ export function EditorCanvasViewport() {
 
       for (const file of files) {
         const kind = inferFileAssetKind(file)
-        if (kind === "image" || kind === "video") {
+        if (kind === "image" || kind === "video" || kind === "model") {
           try {
             const asset = await loadAsset(file)
             const layerId = addLayer(kind)
             setLayerAsset(layerId, asset.id)
+            seedDurationFromMedia(getSeedableMediaDuration(asset))
           } catch {
-            // No-op.
+            return
           }
         }
       }
     },
-    [addLayer, loadAsset, setLayerAsset]
+    [addLayer, loadAsset, seedDurationFromMedia, setLayerAsset]
   )
 
   useEffect(() => {
-    const isEditableTarget = (target: EventTarget | null): boolean =>
-      target instanceof HTMLElement &&
-      (target.isContentEditable ||
-        target instanceof HTMLInputElement ||
-        target instanceof HTMLTextAreaElement ||
-        target instanceof HTMLSelectElement)
-
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === " " && !isEditableTarget(event.target)) {
+        if (
+          !(
+            event.target instanceof Element &&
+            event.target.closest("button, a[href], summary, [role='button']")
+          )
+        ) {
+          event.preventDefault()
+        }
         setIsSpacePressed(true)
       }
     }
@@ -184,7 +247,9 @@ export function EditorCanvasViewport() {
           x: event.clientX - rect.left - rect.width / 2,
           y: event.clientY - rect.top - rect.height / 2,
         }
-        const nextZoom = clampZoom(state.zoom * getWheelZoomFactor(event.deltaY))
+        const nextZoom = clampZoom(
+          state.zoom * getWheelZoomFactor(event.deltaY)
+        )
         const nextState = applyZoomAtPoint(
           state.zoom,
           state.panOffset,
@@ -240,10 +305,12 @@ export function EditorCanvasViewport() {
         return
       }
 
-      useEditorStore.getState().setPan(
-        activePan.startPanX + (event.clientX - activePan.originX),
-        activePan.startPanY + (event.clientY - activePan.originY)
-      )
+      useEditorStore
+        .getState()
+        .setPan(
+          activePan.startPanX + (event.clientX - activePan.originX),
+          activePan.startPanY + (event.clientY - activePan.originY)
+        )
     },
     []
   )
@@ -295,10 +362,24 @@ export function EditorCanvasViewport() {
       <div
         ref={viewportRef}
         className="absolute inset-0 overflow-hidden"
+        data-canvas-viewport="true"
+        data-handles-peek={handlesPeeking ? "true" : undefined}
         role="application"
         aria-label="Canvas viewport"
         style={{
           cursor: viewportCursor,
+        }}
+        onDoubleClick={(event) => {
+          if (isSpacePressed || !isReady) return
+          const state = useLayerStore.getState()
+          const id = findTextLayerToEdit(state.layers, state.selectedLayerId)
+          if (!id) return
+          event.preventDefault()
+          if (state.selectedLayerId !== id) state.selectLayer(id)
+          const layer = state.layers.find((l) => l.id === id)
+          useTextEditStore
+            .getState()
+            .edit(id, typeof layer?.params.text === "string" ? layer.params.text : "")
         }}
         onDragOver={handleDragOver}
         onDragLeave={handleDragLeave}
@@ -321,22 +402,62 @@ export function EditorCanvasViewport() {
               transformOrigin: "center center",
             }}
           >
-            <canvas
-              data-editor-canvas="true"
-              ref={canvasRef}
-              className="absolute inset-0 h-full w-full [image-rendering:pixelated]"
-            />
-            {compositionOverlay && (
-              <div
-                aria-hidden="true"
-                className="pointer-events-none absolute left-1/2 top-1/2 z-10 -translate-x-1/2 -translate-y-1/2 border border-white/20"
-                style={{
-                  width: `${compositionOverlay.widthPercent}%`,
-                  height: `${compositionOverlay.heightPercent}%`,
-                  boxShadow: "0 0 0 9999px rgba(0, 0, 0, 0.55)",
-                }}
+            <div
+              data-artboard={fixedArtboard ? "fixed" : "screen"}
+              className={
+                fixedArtboard
+                  ? "absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2"
+                  : "absolute inset-0"
+              }
+              style={
+                fixedArtboard
+                  ? { width: canvasSize.width, height: canvasSize.height }
+                  : undefined
+              }
+            >
+              <canvas
+                data-editor-canvas="true"
+                ref={canvasRef}
+                className="absolute inset-0 h-full w-full [image-rendering:pixelated]"
               />
-            )}
+              <LayoutGridOverlay hidden={exportingPreview} />
+              <CellPaintOverlay
+                panning={isSpacePressed}
+                disabled={exportingPreview || !isReady || !!pendingSceneSlug}
+              />
+              <div
+                className={paintingCells ? "hidden" : "contents"}
+                data-canvas-handles="true"
+              >
+                <ModelGizmoOverlay
+                  panning={isSpacePressed}
+                  disabled={exportingPreview || !isReady || !!pendingSceneSlug}
+                />
+                <ShapeHandlesOverlay
+                  panning={isSpacePressed}
+                  disabled={exportingPreview || !isReady || !!pendingSceneSlug}
+                />
+                <TextHandlesOverlay
+                  panning={isSpacePressed}
+                  disabled={exportingPreview || !isReady || !!pendingSceneSlug}
+                />
+                <AnnotationHandlesOverlay
+                  panning={isSpacePressed}
+                  disabled={exportingPreview || !isReady || !!pendingSceneSlug}
+                />
+                <GradientPointsOverlay
+                  panning={isSpacePressed}
+                  disabled={exportingPreview || !isReady || !!pendingSceneSlug}
+                />
+                <MaskHandlesOverlay
+                  panning={isSpacePressed}
+                  disabled={exportingPreview || !isReady || !!pendingSceneSlug}
+                />
+              </div>
+              <TextEditOverlay
+                disabled={exportingPreview || !isReady || !!pendingSceneSlug}
+              />
+            </div>
             {immersiveCanvas ? (
               <>
                 <div
@@ -354,8 +475,57 @@ export function EditorCanvasViewport() {
           </div>
         </div>
 
+        {isEmpty &&
+        isReady &&
+        !pendingSceneSlug &&
+        !immersiveCanvas &&
+        !exportingPreview ? (
+          <div
+            className={cn(
+              "pointer-events-none absolute inset-0 flex items-center justify-center p-6",
+              isLightColor(sceneConfig.backgroundColor)
+                ? "ds-on-paper"
+                : "ds-on-media"
+            )}
+          >
+            <div className="pointer-events-auto flex max-w-72 flex-col items-center gap-[var(--ds-space-4)] text-center">
+              <span className="inline-flex size-12 items-center justify-center rounded-toolbar bg-[var(--ds-color-surface-control)] text-[var(--ds-color-text-secondary)] shadow-[var(--ds-shadow-recessed)]">
+                <StackIcon height={20} width={20} />
+              </span>
+              <span className="flex flex-col gap-[var(--ds-space-1)]">
+                <Typography
+                  align="center"
+                  as="span"
+                  className="font-medium"
+                  variant="title"
+                >
+                  Start with a layer
+                </Typography>
+                <Typography
+                  align="center"
+                  as="span"
+                  className="text-balance"
+                  tone="secondary"
+                  variant="body"
+                >
+                  Add an effect or a source, or drop an image or video anywhere
+                  on the canvas.
+                </Typography>
+              </span>
+              <Button
+                onClick={requestLayerPicker}
+                size="compact"
+                variant="primary"
+              >
+                <PlusIcon height={14} width={14} />
+                Add layer
+              </Button>
+            </div>
+          </div>
+        ) : null}
+
         {isDragOver ? (
-          <div className="pointer-events-none absolute inset-0 z-40 flex items-center justify-center border-2 border-dashed border-white/30 bg-black/30 backdrop-blur-[2px]">
+          <div className="ds-on-media pointer-events-none absolute inset-0 z-40 flex items-center justify-center border-2 border-dashed border-white/30 bg-black/30 backdrop-blur-[2px]">
             <span className="font-[var(--ds-font-sans)] text-xs text-white/70">
               Drop to add layer
             </span>
@@ -363,13 +533,50 @@ export function EditorCanvasViewport() {
         ) : null}
       </div>
 
-      {!isReady ? (
-        <div className="pointer-events-none absolute inset-0 flex items-center justify-center p-6">
+      {fallbackMessage ? (
+        <div className="absolute inset-0 flex items-center justify-center p-6">
+          <div
+            className="max-w-sm rounded-[var(--ds-radius-panel)] border border-[var(--ds-border-panel)] bg-[rgb(18_18_22_/_0.88)] px-4 py-3 backdrop-blur-[28px]"
+            role="alert"
+          >
+            <p className="mb-1 font-[var(--ds-font-mono)] text-[11px] leading-4 text-[var(--ds-color-text-primary)] uppercase tracking-[0.18em]">
+              Renderer unavailable
+            </p>
+            <p className="text-[12px] text-[var(--ds-color-text-secondary)] leading-5">
+              {fallbackMessage}
+            </p>
+          </div>
+        </div>
+      ) : null}
+
+      {/* Rides the same signal as the boot overlay below: the credit only
+          appears once the full UI is revealed, never on the loading screen. */}
+      {fallbackMessage || (isReady && !pendingSceneSlug) ? (
+        <MadeByBasement />
+      ) : null}
+
+      {/* Guarded: otherwise this sweeps forever on a dead renderer. */}
+      {fallbackMessage || (isReady && !pendingSceneSlug) ? null : (
+        <div className="ds-on-media pointer-events-none absolute inset-0 z-10 flex items-center justify-center bg-[var(--ds-color-surface-canvas,#050507)] p-6">
           <div
             aria-hidden="true"
-            className="relative h-px w-[min(180px,28vw)] overflow-hidden bg-white/12"
+            className="relative h-[3px] w-[min(220px,32vw)] overflow-hidden rounded-full bg-white/12"
           >
-            <div className="absolute inset-y-0 left-0 w-[38%] animate-[loader-sweep_1.15s_cubic-bezier(0.22,1,0.36,1)_infinite] bg-white/72 shadow-[0_0_18px_rgba(255,255,255,0.18)]" />
+            <div className="absolute inset-y-0 left-0 w-[38%] animate-[loader-bounce_0.9s_cubic-bezier(0.65,0,0.35,1)_infinite_alternate] rounded-full bg-white/72 shadow-[0_0_18px_rgba(255,255,255,0.18)]" />
+          </div>
+        </div>
+      )}
+
+      {exportingPreview ? (
+        <div className="pointer-events-none absolute inset-0 flex items-center justify-center p-6">
+          <div className="inline-flex items-center gap-2 rounded-full border border-[var(--skin-popup-border)] bg-[var(--skin-popup)] px-3 py-1.5 shadow-[var(--ds-shadow-pill-dark)] backdrop-blur-[28px]">
+            <span
+              aria-hidden="true"
+              className="h-1.5 w-1.5 shrink-0 animate-pulse rounded-full bg-[var(--ds-color-accent)]"
+            />
+            <span className="font-[var(--ds-font-mono)] text-[11px] leading-4 text-[var(--ds-color-text-secondary)]">
+              Exporting — keep this tab open
+            </span>
           </div>
         </div>
       ) : null}

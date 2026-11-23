@@ -36,7 +36,40 @@ bun add @basementstudio/shader-lab three
 - Composition texture output is canvas-backed and can be consumed by WebGL or WebGPU host scenes
 - Postprocessing must run on the same `WebGPURenderer` as the scene texture you pass in
 
-Supported effect layers include ASCII, CRT, directional blur, dithering, halftone, ink, particle grid, pattern, pixelation, pixel sorting, posterize, slice, edge detect, displacement map, and chromatic aberration.
+Supported effect layers include ASCII, blob tracking, CRT, directional blur, dithering, halftone, ink, particle grid, pattern, pixelation, pixel sorting, posterize, slice, edge detect, displacement map, and chromatic aberration.
+
+The blob-tracking layer detects moving (or bright) regions of the content below and frames them with CCTV-style shapes, labels, connecting lines, and trails. One inner effect can render inside the detected shapes via `params.innerEffectType` (any pass-backed effect type) and `params.innerEffectParams` (a JSON string of that effect's parameter overrides; see the `ShaderLabBlobInnerEffect` type). Set `params.outputMode` to `"mask"` to emit white-on-black fills for use with `compositeMode: "mask"`.
+
+## Isolated groups
+
+Exported configs can include layers with `kind: "group"`, `type: "group"`, and `params: {}`. Children reference the group's ID through `parentId`. The flat array uses top-first, depth-first order: group first, then all of its descendants, then the next sibling. Missing or null `parentId` places a layer at the scene root. IDs must be unique and nesting is limited to eight groups.
+
+For example, the order `[title, portraitGroup, halftone, photo, background]` with `halftone.parentId` and `photo.parentId` set to `portraitGroup.id` confines halftone to the photo. Each group starts transparent, processes its contents, and then applies its own opacity and blend mode to the result. Hiding a group hides its whole subtree without changing child visibility. Group opacity/visibility can use ordinary layer timeline tracks.
+
+Groups use `compositeMode: "filter"`, `hue: 0`, and `saturation: 1`; coverage masks and group color adjustments are not exposed in this iteration. Group targets currently cost about 32 MiB per group at 1080p. Existing flat configs continue to work without any new fields.
+
+## Fonts
+
+The ASCII and text layers resolve font families at runtime by reading CSS
+custom properties (`--geist-mono`, `--bsmnt-grotesque`, `--adhesion`, …) from
+the document root. The value of each variable is used as the CSS
+`font-family` for glyph rasterization; when a variable is unset, the layer
+falls back to a system font.
+
+The package ships the three openly licensed families — Geist Sans, Geist
+Mono, and BSMNT Grotesque — with a stylesheet that declares the `@font-face`
+rules and sets their variables:
+
+```ts
+import "@basementstudio/shader-lab/fonts.css"
+```
+
+The remaining families selectable in the Shader Lab editor (Adhesion, Blob,
+Bunker, Caniche, Carpenter, Curia, FFFlauta, Numero, Xer0, Trovador, B-Mecha)
+are commercially licensed. They are used in the hosted Shader Lab app but are
+deliberately not distributed with this package. To use them (or any font of
+your own), load the font in your host app and set the matching CSS variable
+to its family name, e.g. `:root { --adhesion: "Adhesion" }`.
 
 ## API Overview
 
@@ -90,10 +123,20 @@ Handle runtime errors:
 <ShaderLabComposition
   config={config}
   onRuntimeError={(message) => {
-    console.error(message)
+    if (message) {
+      console.error(message)
+    } else {
+      console.info("Shader Lab runtime error resolved.")
+    }
   }}
 />
 ```
+
+`onRuntimeError` is called with a string message when a runtime error occurs
+(renderer initialization failure, shader compilation error, missing WebGPU
+support). After an error has been reported, it is called once with `null` when
+the error is resolved so error UIs can recover. It is never called with `null`
+before an error has been reported.
 
 ## 2. Use a Composition as a Texture
 
@@ -311,6 +354,13 @@ export function PostProcessingExample({
 - Effect-only Shader Lab configs are the most natural fit here
 - Keep the postprocessing `width`/`height` and `postprocessing.resize(...)` in sync with the input render target size, especially for screen-space effects like dithering, pixelation, and ASCII
 - `postprocessing.texture` always points to the latest output texture
+
+External input textures and output textures use straight (unpremultiplied) RGB
+and alpha. The texture path preserves input coverage through effect passes;
+effect output alpha controls effect strength. Source layers use source-over
+composition. Convert premultiplied input to straight alpha before passing it in.
+Legacy mask layers still use their existing RGB-darkening behavior, and the
+canvas composition background remains opaque.
 
 ## `useShaderLab`
 
@@ -617,6 +667,11 @@ export const sketch = Fn(() => {
 ```
 
 ## Included Runtime Support
+
+Image and video layers in Contain mode support `params.transparentBounds: true`
+to reveal the content beneath their empty borders. Omit the setting or use
+`false` to retain black borders. This option does not affect Cover mode or make
+the composition's canvas background transparent.
 
 - Gradient
 - Text

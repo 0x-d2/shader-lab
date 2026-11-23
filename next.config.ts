@@ -1,7 +1,46 @@
 import withBundleAnalyzer from "@next/bundle-analyzer"
+import { withSentryConfig } from "@sentry/nextjs"
+import { withBotId } from "botid/next/config"
 import type { NextConfig } from "next"
+import { readEnvList } from "@/lib/read-env"
 
 const shaderLabRuntimeEntry = "./packages/shader-lab-react/dist/src/index.js"
+
+const BUILT_IN_ASSET_HOSTS = ["cloudflarestream.com", "videodelivery.net"]
+
+const ASSET_HOST_VARS = [
+  "NEXT_PUBLIC_CF_IMAGES_HOST",
+  "NEXT_PUBLIC_R2_PUBLIC_HOST",
+  "NEXT_PUBLIC_COMMUNITY_ASSET_HOSTS",
+]
+
+type AssetImagePattern = {
+  hostname: string
+  protocol: "https"
+}
+
+export function allowedAssetImageHosts(): string[] {
+  const hosts = [
+    ...BUILT_IN_ASSET_HOSTS,
+    ...ASSET_HOST_VARS.flatMap((name) => readEnvList(name)),
+  ].map((entry) =>
+    entry
+      .toLowerCase()
+      .replace(/^[a-z][a-z0-9+.-]*:\/\//, "")
+      .replace(/\/.*$/, "")
+      .replace(/:\d+$/, "")
+  )
+
+  return [...new Set(hosts.filter((host) => host.length > 0))]
+}
+
+export function allowedAssetImagePatterns(): AssetImagePattern[] {
+  return allowedAssetImageHosts().flatMap((host) =>
+    [host, `**.${host}`].map(
+      (hostname) => ({ hostname, protocol: "https" }) as const
+    )
+  )
+}
 
 const nextConfig: NextConfig = {
   reactStrictMode: true,
@@ -67,25 +106,38 @@ const nextConfig: NextConfig = {
   experimental: {
     browserDebugInfoInTerminal: true,
     optimizePackageImports: [
-      "@react-three/drei",
-      "@react-three/fiber",
-      "gsap",
+      "@radix-ui/react-icons",
+      "motion",
       "three",
-      "postprocessing",
-      "lenis",
       "zustand",
     ],
   },
   images: {
     dangerouslyAllowSVG: true,
-    remotePatterns: [],
+    remotePatterns: [
+      { hostname: "avatars.githubusercontent.com", protocol: "https" },
+      { hostname: "lh3.googleusercontent.com", protocol: "https" },
+      ...allowedAssetImagePatterns(),
+    ],
     minimumCacheTTL: 60 * 60 * 24 * 30, // 30 days
     qualities: [90],
     formats: ["image/avif", "image/webp"],
-    deviceSizes: [640, 750, 828, 1080, 1200, 1920, 2048, 3840],
+    // Capped at 2560: the 3840 candidate produced multi-MB srcset entries on
+    // full-bleed imagery (community hero) for no visible gain.
+    deviceSizes: [640, 750, 828, 1080, 1200, 1920, 2048, 2560],
     imageSizes: [16, 32, 48, 64, 96, 128, 256, 384],
   },
   headers: async () => [
+    {
+      // Fixed filenames, so a SWR window rather than `immutable`.
+      source: "/:dir(scenes|examples|textures|assets)/:path*",
+      headers: [
+        {
+          key: "Cache-Control",
+          value: "public, max-age=604800, stale-while-revalidate=2592000",
+        },
+      ],
+    },
     {
       source: "/(.*)",
       headers: [
@@ -135,8 +187,41 @@ const bundleAnalyzerPlugin = withBundleAnalyzer({
 })
 
 const NextApp = () => {
-  const plugins = [bundleAnalyzerPlugin]
+  const plugins = [bundleAnalyzerPlugin, withBotId]
   return plugins.reduce((config, plugin) => plugin(config), nextConfig)
 }
 
-export default NextApp
+// Not the token alone: a dev machine can have one in .env.sentry-build-plugin.
+const canPublishSentryArtifacts =
+  process.env.VERCEL === "1" && Boolean(process.env.SENTRY_AUTH_TOKEN)
+
+if (process.env.VERCEL_ENV === "production" && !canPublishSentryArtifacts) {
+  console.warn(
+    "[sentry] SENTRY_AUTH_TOKEN is not set — skipping sourcemap upload and release creation. Production stack traces will be minified."
+  )
+}
+
+export default withSentryConfig(NextApp, {
+  org: "basement-studio",
+  project: "shader-lab",
+  silent: !process.env.VERCEL,
+  widenClientFileUpload: true,
+  tunnelRoute: "/monitoring",
+  // Replay is never initialized in instrumentation-client.ts; strip its
+  // dead weight (and debug logging) from the shipped SDK.
+  bundleSizeOptimizations: {
+    excludeDebugStatements: true,
+    excludeReplayShadowDom: true,
+    excludeReplayIframe: true,
+    excludeReplayWorker: true,
+  },
+  sourcemaps: { disable: !canPublishSentryArtifacts },
+  release: {
+    create: canPublishSentryArtifacts,
+    // Must be explicit: @sentry/nextjs skips release name resolution when
+    // `create` is false, leaving tokenless builds with no release tag at all.
+    ...(process.env.VERCEL_GIT_COMMIT_SHA
+      ? { name: process.env.VERCEL_GIT_COMMIT_SHA }
+      : {}),
+  },
+})

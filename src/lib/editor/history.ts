@@ -1,11 +1,24 @@
+import { getDocumentSize } from "@/lib/editor/composition"
+import { useEditorStore } from "@/store/editor-store"
 import type {
+  EditorAudioSnapshot,
   EditorHistorySnapshot,
   TimelineStateSnapshot,
 } from "@/types/editor"
+import { useAudioStore } from "@/store/audio-store"
 import { useLayerStore } from "@/store/layer-store"
 import { useTimelineStore } from "@/store/timeline-store"
 
 type HistoryTimelineSnapshot = EditorHistorySnapshot["timeline"]
+
+function cloneHistoryAudio(audio: EditorAudioSnapshot): EditorAudioSnapshot {
+  return structuredClone({
+    bands: audio.bands,
+    links: audio.links,
+    offsetSeconds: audio.offsetSeconds,
+    source: audio.source,
+  })
+}
 
 function cloneHistoryTimeline(
   timeline: Pick<
@@ -17,7 +30,7 @@ function cloneHistoryTimeline(
     | "selectedKeyframeIds"
     | "selectedTrackId"
     | "tracks"
-  >,
+  >
 ): HistoryTimelineSnapshot {
   return structuredClone({
     currentTime: timeline.currentTime,
@@ -33,7 +46,7 @@ function cloneHistoryTimeline(
 export function buildEditorHistorySnapshotFromState(
   layerState: Pick<
     ReturnType<typeof useLayerStore.getState>,
-    "hoveredLayerId" | "layers" | "selectedLayerId"
+    "hoveredLayerId" | "layers" | "selectedLayerId" | "selectedLayerIds"
   >,
   timelineState: Pick<
     TimelineStateSnapshot,
@@ -45,11 +58,16 @@ export function buildEditorHistorySnapshotFromState(
     | "selectedTrackId"
     | "tracks"
   >,
+  audioState: EditorAudioSnapshot,
+  editorState = useEditorStore.getState()
 ): EditorHistorySnapshot {
   return {
+    audio: cloneHistoryAudio(audioState),
+    sceneConfig: structuredClone(editorState.sceneConfig),
     hoveredLayerId: layerState.hoveredLayerId,
     layers: structuredClone(layerState.layers),
     selectedLayerId: layerState.selectedLayerId,
+    selectedLayerIds: [...layerState.selectedLayerIds],
     timeline: cloneHistoryTimeline(timelineState),
   }
 }
@@ -58,13 +76,21 @@ export function buildEditorHistorySnapshot(): EditorHistorySnapshot {
   return buildEditorHistorySnapshotFromState(
     useLayerStore.getState(),
     useTimelineStore.getState(),
+    useAudioStore.getState().getSnapshot()
   )
 }
 
-export function applyEditorHistorySnapshot(snapshot: EditorHistorySnapshot): void {
+export function applyEditorHistorySnapshot(
+  snapshot: EditorHistorySnapshot
+): void {
   useLayerStore
     .getState()
-    .replaceState(snapshot.layers, snapshot.selectedLayerId, snapshot.hoveredLayerId)
+    .replaceState(
+      snapshot.layers,
+      snapshot.selectedLayerId,
+      snapshot.hoveredLayerId,
+      snapshot.selectedLayerIds
+    )
   useTimelineStore.getState().replaceState({
     currentTime: snapshot.timeline.currentTime,
     duration: snapshot.timeline.duration,
@@ -75,11 +101,27 @@ export function applyEditorHistorySnapshot(snapshot: EditorHistorySnapshot): voi
     selectedTrackId: snapshot.timeline.selectedTrackId,
     tracks: snapshot.timeline.tracks,
   })
+  useAudioStore.getState().restoreSnapshot(snapshot.audio)
+  const editorStore = useEditorStore.getState()
+  const sceneConfig = structuredClone(snapshot.sceneConfig)
+  const documentSize = getDocumentSize(sceneConfig, editorStore.outputSize)
+  if (documentSize) {
+    editorStore.setOutputSize(documentSize.width, documentSize.height)
+  }
+  editorStore.updateSceneConfig(sceneConfig)
 }
 
-export function getHistorySnapshotSignature(snapshot: EditorHistorySnapshot): string {
+export function getHistorySnapshotSignature(
+  snapshot: EditorHistorySnapshot
+): string {
   return JSON.stringify({
+    audio: snapshot.audio,
+    sceneConfig: snapshot.sceneConfig,
     layers: snapshot.layers,
-    timeline: snapshot.timeline,
+    timeline: {
+      duration: snapshot.timeline.duration,
+      loop: snapshot.timeline.loop,
+      tracks: snapshot.timeline.tracks,
+    },
   })
 }

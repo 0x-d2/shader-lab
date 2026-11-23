@@ -1,10 +1,15 @@
 "use client"
+import { isLayerGroup } from "@/renderer/layer-hierarchy"
 import {
+  ChevronDownIcon,
+  ChevronRightIcon,
+  CubeIcon,
   DotsVerticalIcon,
   DragHandleDots2Icon,
   EyeClosedIcon,
   EyeOpenIcon,
   FileIcon,
+  GroupIcon,
   ImageIcon,
   LayoutIcon,
   ShadowIcon,
@@ -12,13 +17,12 @@ import {
   TransparencyGridIcon,
   TrashIcon,
 } from "@radix-ui/react-icons"
-import { Reorder, useDragControls } from "motion/react"
+import Image from "next/image"
 import {
   type ChangeEvent,
   memo,
   type MouseEvent as ReactMouseEvent,
   type ReactNode,
-  type PointerEvent as ReactPointerEvent,
   useEffect,
   useMemo,
   useRef,
@@ -29,23 +33,30 @@ import {
   type AddLayerAction,
   LayerPicker,
 } from "@/components/editor/layer-picker"
+import { useLayerDrag } from "@/components/editor/use-layer-drag"
 import { GlassPanel } from "@/components/ui/glass-panel"
 import { IconButton } from "@/components/ui/icon-button"
 import { Select } from "@/components/ui/select"
-import { HoverTooltip } from "@/components/ui/tooltip"
 import { Typography } from "@/components/ui/typography"
 import { playUISound } from "@/lib/audio/shader-lab-sounds"
 import { cn } from "@/lib/cn"
-import { inferFileAssetKind } from "@/lib/editor/media-file"
+import { duplicateLayers } from "@/lib/editor/duplicate-layers"
+import {
+  groupingSelection,
+  type LayerDropTarget,
+} from "@/lib/editor/layer-groups"
+import { getAssetAccept, inferFileAssetKind } from "@/lib/editor/media-file"
+import { getSeedableMediaDuration } from "@/lib/editor/timeline-duration"
 import { useAssetStore } from "@/store/asset-store"
 import { useEditorStore } from "@/store/editor-store"
 import { useLayerStore } from "@/store/layer-store"
+import { useTimelineStore } from "@/store/timeline-store"
 import type { AssetKind, EditorAsset, EditorLayer } from "@/types/editor"
 
-type LayerAction = "delete" | "reset"
+type LayerAction = "delete" | "duplicate" | "reset" | "ungroup" | "up" | "down"
 
 const thumbnailBaseClassName =
-  "relative size-7 overflow-hidden rounded-[var(--ds-radius-thumb)] border border-white/6"
+  "relative size-7 overflow-hidden rounded-[var(--ds-radius-row-thumb)] border border-[var(--ds-border-divider)]"
 
 function LayerThumbnail({
   asset,
@@ -54,7 +65,8 @@ function LayerThumbnail({
   asset: EditorAsset | null
   layer: EditorLayer
 }) {
-  const hasPreview = asset?.kind === "image" || asset?.kind === "video"
+  const previewUrl = asset?.kind === "image" ? asset.url : null
+  const isLocalPreview = previewUrl?.startsWith("blob:") ?? false
   let PlaceholderIcon = ImageIcon
   if (layer.type === "pattern") {
     PlaceholderIcon = TransparencyGridIcon
@@ -62,21 +74,35 @@ function LayerThumbnail({
     PlaceholderIcon = ShadowIcon
   } else if (layer.type === "text") {
     PlaceholderIcon = TextIcon
+  } else if (layer.type === "model") {
+    PlaceholderIcon = CubeIcon
   }
 
   return (
     <div
       className={cn(
         thumbnailBaseClassName,
-        hasPreview
+        previewUrl
           ? "bg-center bg-cover"
           : "flex items-center justify-center bg-[var(--ds-color-surface-subtle)] text-[var(--ds-color-text-muted)]"
       )}
       style={
-        hasPreview ? { backgroundImage: `url("${asset.url}")` } : undefined
+        isLocalPreview && previewUrl
+          ? { backgroundImage: `url("${previewUrl}")` }
+          : undefined
       }
     >
-      {hasPreview ? null : (
+      {previewUrl && !isLocalPreview ? (
+        <Image
+          alt=""
+          className="object-cover"
+          fill
+          sizes="28px"
+          src={previewUrl}
+        />
+      ) : null}
+
+      {previewUrl ? null : (
         <PlaceholderIcon aria-hidden="true" height={14} width={14} />
       )}
     </div>
@@ -95,22 +121,15 @@ function getExpectedAssetKind(layer: EditorLayer): AssetKind | null {
   return null
 }
 
-function getAcceptForAssetKind(kind: AssetKind): string {
-  switch (kind) {
-    case "image":
-      return "image/png,image/jpeg,image/webp,image/gif,image/svg+xml,.svg"
-    case "video":
-      return "video/mp4,video/webm,video/quicktime,.mov"
-    case "model":
-      return ".glb,.gltf,.obj,model/gltf-binary,model/gltf+json,model/obj,application/octet-stream"
-  }
-}
-
 function inferSelectedFileKind(file: File): AssetKind | null {
   return inferFileAssetKind(file)
 }
 
 type LayerListItemProps = {
+  children?: ReactNode
+  dragPlacement?: LayerDropTarget["placement"] | undefined
+  isDragging: boolean
+  onDragStart: ReturnType<typeof useLayerDrag>["start"]
   asset: EditorAsset | null
   hasMissingAsset: boolean
   isFloatingPanelDragging: boolean
@@ -127,6 +146,7 @@ type LayerListItemProps = {
 }
 
 const LAYER_ACTION_OPTIONS = [
+  { label: "Duplicate layer", value: "duplicate" },
   { label: "Reset properties", value: "reset" },
   { label: "Delete layer", value: "delete" },
 ] as const satisfies readonly {
@@ -136,33 +156,28 @@ const LAYER_ACTION_OPTIONS = [
 
 function LayerListShell({
   children,
-  isFloatingPanelDragging,
-  onReorder,
-  values,
+  nested = false,
 }: {
   children: ReactNode
-  isFloatingPanelDragging: boolean
-  onReorder: (nextLayers: EditorLayer[]) => void
-  values: EditorLayer[]
+  nested?: boolean
 }) {
-  const className =
-    "flex max-h-[min(52vh,480px)] flex-col gap-0.5 overflow-y-auto p-1"
-
-  if (isFloatingPanelDragging) {
-    return <ul className={className}>{children}</ul>
-  }
-
   return (
-    <Reorder.Group
-      axis="y"
-      as="ul"
-      className={className}
-      onReorder={onReorder}
-      values={values}
+    <ul
+      data-layer-tree-root={nested ? undefined : "true"}
+      className={
+        nested
+          ? "ml-2 flex flex-col gap-0.5 border-l border-[var(--ds-border-divider)] pl-1"
+          : "flex max-h-[min(44vh,320px)] min-[900px]:max-h-[min(52vh,480px)] flex-col gap-0.5 overflow-y-auto overscroll-contain p-bar"
+      }
     >
       {children}
-    </Reorder.Group>
+    </ul>
   )
+}
+
+function focusNameInput(node: HTMLInputElement | null) {
+  node?.focus()
+  node?.select()
 }
 
 const LayerListItem = memo(function LayerListItem({
@@ -176,68 +191,122 @@ const LayerListItem = memo(function LayerListItem({
   onRelinkPick,
   onSelectLayer,
   onSetLayerVisibility,
+  children,
+  dragPlacement,
+  isDragging,
+  onDragStart,
 }: LayerListItemProps) {
-  const dragControls = useDragControls()
+  const [renaming, setRenaming] = useState(false)
+  const [name, setName] = useState(layer.name)
+  const cancelRename = useRef(false)
+  const renameLayer = useLayerStore((state) => state.renameLayer)
+  const setExpanded = useLayerStore((state) => state.setLayerExpanded)
+  const isGroup = isLayerGroup(layer)
 
-  function handlePointerDown(event: ReactPointerEvent<HTMLButtonElement>) {
-    if (layer.locked || isFloatingPanelDragging) {
-      return
-    }
-
-    dragControls.start(event)
+  function startRename() {
+    cancelRename.current = false
+    setName(layer.name)
+    setRenaming(true)
   }
 
-  if (isFloatingPanelDragging) {
-    return (
-      <li
+  function finishRename() {
+    if (!cancelRename.current) renameLayer(layer.id, name)
+    setRenaming(false)
+  }
+
+  const options = [
+    { label: "Rename", value: "rename" },
+    ...(isGroup ? [{ label: "Ungroup", value: "ungroup" }] : []),
+    { label: "Move up", value: "up" },
+    { label: "Move down", value: "down" },
+    ...LAYER_ACTION_OPTIONS,
+  ]
+
+  const content = (
+    <>
+      <div
+        data-layer-row={layer.id}
+        data-drop-inside={dragPlacement === "inside" || undefined}
         className={cn(
-          "relative grid min-h-11 grid-cols-[minmax(0,1fr)_28px_28px_28px] items-center gap-[var(--ds-space-2)] rounded-[var(--ds-radius-control)] border border-transparent px-2 py-[6px] transition-[background-color,border-color,box-shadow] duration-160 ease-[var(--ease-out-cubic)]",
-          !layer.locked &&
-            "cursor-pointer hover:border-[var(--ds-border-subtle)] hover:bg-[var(--ds-color-surface-subtle)]",
+          dragPlacement === "inside" &&
+            "ring-1 ring-inset ring-[var(--ds-color-text-primary)]",
+          "relative grid min-h-11 grid-cols-[minmax(0,1fr)_28px_28px_28px] items-center gap-1 rounded-[var(--ds-radius-row)] p-[var(--ds-space-row-inset)] transition-[background-color,box-shadow] duration-160 ease-[var(--ease-out-cubic)]",
+          !(layer.locked || isSelected) &&
+            "hover:bg-[var(--skin-row-hover)]",
           isSelected &&
-            "border-[var(--ds-border-active)] bg-[var(--ds-color-surface-active)]"
+            "bg-[var(--skin-row-selected)] shadow-[var(--ds-shadow-raised)]"
         )}
       >
-        <div className="grid min-w-0 grid-cols-[14px_minmax(0,1fr)] items-center gap-[var(--ds-space-2)]">
-          <HoverTooltip content="Reorder" side="right">
-            <button
-              aria-label={`Reorder ${layer.name}`}
-              className={cn(
-                "inline-flex h-[14px] w-[14px] touch-none items-center justify-center bg-transparent p-0 text-[var(--ds-color-text-muted)]",
-                !layer.locked && "cursor-grab active:cursor-grabbing",
-                layer.locked && "text-[var(--ds-color-text-disabled)]"
-              )}
-              disabled
-              type="button"
-            >
-              <DragHandleDots2Icon height={14} width={14} />
-            </button>
-          </HoverTooltip>
-
+        <div className="flex min-w-0 items-center gap-1.5">
           <button
-            className="grid min-w-0 cursor-pointer grid-cols-[28px_minmax(0,1fr)] items-center gap-[var(--ds-space-2)] bg-transparent p-0 text-left text-inherit"
-            onClick={(event) => onSelectLayer(layer.id, event)}
+            aria-label={`Reorder ${layer.name}`}
+            className="inline-flex size-4 shrink-0 touch-none items-center justify-center bg-transparent p-0 text-[var(--ds-color-text-muted)] enabled:cursor-grab enabled:active:cursor-grabbing disabled:opacity-40"
+            disabled={layer.locked || isFloatingPanelDragging}
+            onPointerDown={(event) => {
+              event.stopPropagation()
+              onDragStart(layer.id, event)
+            }}
             type="button"
           >
-            <LayerThumbnail asset={asset} layer={layer} />
-
-            <div className="flex min-w-0 min-h-7 items-center">
+            <DragHandleDots2Icon height={14} width={14} />
+          </button>
+          {isGroup && (
+            <button
+              aria-label={`${layer.expanded ? "Collapse" : "Expand"} ${layer.name}`}
+              aria-expanded={layer.expanded}
+              className="inline-flex size-5 shrink-0 items-center justify-center text-[var(--ds-color-text-muted)]"
+              onClick={() => setExpanded(layer.id, !layer.expanded)}
+              type="button"
+            >
+              {layer.expanded ? <ChevronDownIcon /> : <ChevronRightIcon />}
+            </button>
+          )}
+          {renaming ? (
+            <input
+              aria-label="Layer name"
+              className="min-w-0 w-full rounded border border-[var(--ds-border-active)] bg-[var(--ds-color-surface-subtle)] px-1 py-1 text-xs text-[var(--ds-color-text-primary)] outline-none"
+              onBlur={finishRename}
+              onChange={(event) => setName(event.target.value)}
+              onKeyDown={(event) => {
+                event.stopPropagation()
+                if (event.key === "Enter") {
+                  event.preventDefault()
+                  finishRename()
+                }
+                if (event.key === "Escape") {
+                  cancelRename.current = true
+                  setRenaming(false)
+                }
+              }}
+              ref={focusNameInput}
+              value={name}
+            />
+          ) : (
+            <button
+              aria-pressed={isSelected}
+              className="flex min-w-0 flex-1 items-center gap-2 bg-transparent p-0 text-left text-inherit"
+              onClick={(event) => onSelectLayer(layer.id, event)}
+              onDoubleClick={startRename}
+              type="button"
+            >
+              {!isGroup && <LayerThumbnail asset={asset} layer={layer} />}
               <Typography
-                className="overflow-hidden text-ellipsis whitespace-nowrap leading-none"
+                className="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap leading-none"
                 variant="label"
               >
                 {layer.name}
               </Typography>
-            </div>
-          </button>
+            </button>
+          )}
         </div>
-
         <Select
-          key={`${layer.id}:${layerActionKey}`}
+          key={`${layer.id}:${layerActionKey}:${renaming}`}
           onValueChange={(value) =>
-            onLayerAction(layer.id, value as LayerAction)
+            value === "rename"
+              ? startRename()
+              : onLayerAction(layer.id, value as LayerAction)
           }
-          options={LAYER_ACTION_OPTIONS}
+          options={options}
           placeholder={<DotsVerticalIcon height={14} width={14} />}
           popupClassName="min-w-[152px]"
           triggerAriaLabel={`Layer actions for ${layer.name}`}
@@ -245,14 +314,10 @@ const LayerListItem = memo(function LayerListItem({
           uiSound="none"
           valueClassName="inline-flex items-center justify-center leading-none text-[var(--ds-color-text-tertiary)] [&_svg]:h-[14px] [&_svg]:w-[14px]"
         />
-
         {hasMissingAsset ? (
           <IconButton
             aria-label={`Relink missing asset for ${layer.name}`}
-            onClick={(event) => {
-              event.stopPropagation()
-              onRelinkPick(layer)
-            }}
+            onClick={() => onRelinkPick(layer)}
             uiSound="none"
             variant="ghost"
           >
@@ -260,13 +325,12 @@ const LayerListItem = memo(function LayerListItem({
           </IconButton>
         ) : (
           <IconButton
-            aria-label={layer.visible ? "Hide layer" : "Show layer"}
-            onClick={(event) => {
-              event.stopPropagation()
-              onSetLayerVisibility(layer.id, !layer.visible)
-            }}
+            aria-label={`${layer.visible ? "Hide" : "Show"} ${layer.name}`}
+            onClick={() => onSetLayerVisibility(layer.id, !layer.visible)}
             tooltip="Toggle visibility"
-            uiSound={layer.visible ? "action.visibilityOff" : "action.visibilityOn"}
+            uiSound={
+              layer.visible ? "action.visibilityOff" : "action.visibilityOn"
+            }
             variant="ghost"
           >
             {layer.visible ? (
@@ -276,135 +340,44 @@ const LayerListItem = memo(function LayerListItem({
             )}
           </IconButton>
         )}
-
         <IconButton
           aria-label={`Delete ${layer.name}`}
-          onClick={(event) => {
-            event.stopPropagation()
-            onLayerAction(layer.id, "delete")
-          }}
-          tooltip="Delete layer"
+          onClick={() => onLayerAction(layer.id, "delete")}
+          tooltip={isGroup ? "Delete group and contents" : "Delete layer"}
           uiSound="none"
           variant="ghost"
         >
           <TrashIcon height={14} width={14} />
         </IconButton>
-      </li>
-    )
-  }
+      </div>
+      {children}
+    </>
+  )
 
   return (
-    <Reorder.Item
-      as="li"
-      className={cn(
-        "relative grid min-h-11 grid-cols-[minmax(0,1fr)_28px_28px_28px] items-center gap-[var(--ds-space-2)] rounded-[var(--ds-radius-control)] border border-transparent px-2 py-[6px] transition-[background-color,border-color,box-shadow] duration-160 ease-[var(--ease-out-cubic)]",
-        !layer.locked &&
-          "cursor-pointer hover:border-[var(--ds-border-subtle)] hover:bg-[var(--ds-color-surface-subtle)]",
-        isSelected &&
-          "border-[var(--ds-border-active)] bg-[var(--ds-color-surface-active)]"
-      )}
-      drag={layer.locked || isFloatingPanelDragging ? false : "y"}
-      dragControls={dragControls}
-      dragListener={false}
-      layout="position"
-      style={{ zIndex: 0 }}
-      value={layer}
+    <li
+      className={cn("relative", isDragging && "opacity-40")}
+      data-layer-item={layer.id}
     >
-      <div className="grid min-w-0 grid-cols-[14px_minmax(0,1fr)] items-center gap-[var(--ds-space-2)]">
-        <HoverTooltip content="Reorder" side="right">
-          <button
-            aria-label={`Reorder ${layer.name}`}
-            className={cn(
-              "inline-flex h-[14px] w-[14px] touch-none items-center justify-center bg-transparent p-0 text-[var(--ds-color-text-muted)]",
-              !layer.locked && "cursor-grab active:cursor-grabbing",
-              layer.locked && "text-[var(--ds-color-text-disabled)]"
-            )}
-            disabled={layer.locked || isFloatingPanelDragging}
-            onPointerDown={handlePointerDown}
-            type="button"
-          >
-            <DragHandleDots2Icon height={14} width={14} />
-          </button>
-        </HoverTooltip>
-
-        <button
-          className="grid min-w-0 cursor-pointer grid-cols-[28px_minmax(0,1fr)] items-center gap-[var(--ds-space-2)] bg-transparent p-0 text-left text-inherit"
-          onClick={(event) => onSelectLayer(layer.id, event)}
-          type="button"
-        >
-          <LayerThumbnail asset={asset} layer={layer} />
-
-          <div className="flex min-w-0 min-h-7 items-center">
-            <Typography
-              className="overflow-hidden text-ellipsis whitespace-nowrap leading-none"
-              variant="label"
-            >
-              {layer.name}
-            </Typography>
-          </div>
-        </button>
-      </div>
-
-      <Select
-        key={`${layer.id}:${layerActionKey}`}
-        onValueChange={(value) => onLayerAction(layer.id, value as LayerAction)}
-        options={LAYER_ACTION_OPTIONS}
-        placeholder={<DotsVerticalIcon height={14} width={14} />}
-        popupClassName="min-w-[152px]"
-        triggerAriaLabel={`Layer actions for ${layer.name}`}
-        triggerVariant="icon"
-        uiSound="none"
-        valueClassName="inline-flex items-center justify-center leading-none text-[var(--ds-color-text-tertiary)] [&_svg]:h-[14px] [&_svg]:w-[14px]"
-      />
-
-      {hasMissingAsset ? (
-        <IconButton
-          aria-label={`Relink missing asset for ${layer.name}`}
-          onClick={(event) => {
-            event.stopPropagation()
-            onRelinkPick(layer)
-          }}
-          uiSound="none"
-          variant="ghost"
-        >
-          <FileIcon height={14} width={14} />
-        </IconButton>
-      ) : (
-        <IconButton
-          aria-label={layer.visible ? "Hide layer" : "Show layer"}
-          onClick={(event) => {
-            event.stopPropagation()
-            onSetLayerVisibility(layer.id, !layer.visible)
-          }}
-          tooltip="Toggle visibility"
-          uiSound={layer.visible ? "action.visibilityOff" : "action.visibilityOn"}
-          variant="ghost"
-        >
-          {layer.visible ? (
-            <EyeOpenIcon height={14} width={14} />
-          ) : (
-            <EyeClosedIcon height={14} width={14} />
-          )}
-        </IconButton>
+      {dragPlacement === "before" && (
+        <div
+          data-drop-line="before"
+          className="pointer-events-none absolute -top-px right-0 left-0 z-10 h-0.5 rounded bg-[var(--ds-color-text-primary)]"
+        />
       )}
-
-      <IconButton
-        aria-label={`Delete ${layer.name}`}
-        onClick={(event) => {
-          event.stopPropagation()
-          onLayerAction(layer.id, "delete")
-        }}
-        tooltip="Delete layer"
-        uiSound="none"
-        variant="ghost"
-      >
-        <TrashIcon height={14} width={14} />
-      </IconButton>
-    </Reorder.Item>
+      {content}
+      {dragPlacement === "after" && (
+        <div
+          data-drop-line="after"
+          className="pointer-events-none absolute -bottom-px right-0 left-0 z-10 h-0.5 rounded bg-[var(--ds-color-text-primary)]"
+        />
+      )}
+    </li>
   )
 })
 
 export function LayerSidebar() {
+  const layerDrag = useLayerDrag()
   const imageInputRef = useRef<HTMLInputElement | null>(null)
   const relinkInputRef = useRef<HTMLInputElement | null>(null)
   const relinkTargetRef = useRef<{
@@ -412,18 +385,32 @@ export function LayerSidebar() {
     layerId: string
   } | null>(null)
   const videoInputRef = useRef<HTMLInputElement | null>(null)
+  const modelInputRef = useRef<HTMLInputElement | null>(null)
   const [layerActionSelectKeys, setLayerActionSelectKeys] = useState<
     Record<string, number>
   >({})
   const [freezeDesktopLayerList, setFreezeDesktopLayerList] = useState(true)
 
   const layers = useLayerStore((state) => state.layers)
-  const hoveredLayerId = useLayerStore((state) => state.hoveredLayerId)
   const selectedLayerIds = useLayerStore((state) => state.selectedLayerIds)
-  const selectedLayerId = useLayerStore((state) => state.selectedLayerId)
   const addLayer = useLayerStore((state) => state.addLayer)
+  const groupLayers = useLayerStore((state) => state.groupLayers)
+  const ungroupLayer = useLayerStore((state) => state.ungroupLayer)
+  const reorderSiblings = useLayerStore((state) => state.reorderSiblings)
+  const [groupError, setGroupError] = useState<string | null>(null)
+  const canGroup =
+    !selectedLayerIds.length ||
+    groupingSelection(layers, selectedLayerIds).length > 0
+  function handleGroup() {
+    const id = groupLayers(selectedLayerIds)
+    setGroupError(
+      id
+        ? null
+        : "Groups support at most eight levels. Select layers within the same group."
+    )
+    if (id) playUISound("action.addLayer")
+  }
   const removeLayers = useLayerStore((state) => state.removeLayers)
-  const replaceState = useLayerStore((state) => state.replaceState)
   const resetLayerParams = useLayerStore((state) => state.resetLayerParams)
   const selectLayerWithModifiers = useLayerStore(
     (state) => state.selectLayerWithModifiers
@@ -434,6 +421,9 @@ export function LayerSidebar() {
   )
   const setLayersVisibility = useLayerStore(
     (state) => state.setLayersVisibility
+  )
+  const seedDurationFromMedia = useTimelineStore(
+    (state) => state.seedDurationFromMedia
   )
   const assets = useAssetStore((state) => state.assets)
   const loadAsset = useAssetStore((state) => state.loadAsset)
@@ -490,14 +480,25 @@ export function LayerSidebar() {
     [assets]
   )
 
-  async function handleMediaFile(file: File, layerType: "image" | "video") {
+  async function handleMediaFile(
+    file: File,
+    layerType: "image" | "model" | "video"
+  ) {
     try {
-      const asset = await loadAsset(file)
+      const asset = await loadAsset(
+        file,
+        layerType === "model" ? { kind: "model" } : undefined
+      )
+      if (asset.kind !== layerType) {
+        removeAsset(asset.id)
+        return
+      }
       const layerId = addLayer(layerType)
       setLayerAsset(layerId, asset.id)
+      seedDurationFromMedia(getSeedableMediaDuration(asset))
       playUISound("action.addLayer")
     } catch {
-      // No-op.
+      return
     }
   }
 
@@ -514,6 +515,8 @@ export function LayerSidebar() {
       handleImagePick()
     } else if (action === "video") {
       handleVideoPick()
+    } else if (action === "model") {
+      modelInputRef.current?.click()
     } else {
       addLayer(action)
       playUISound("action.addLayer")
@@ -525,9 +528,28 @@ export function LayerSidebar() {
       ? selectedLayerIds
       : [layerId]
 
-    if (action === "delete") {
+    if (action === "ungroup") {
+      ungroupLayer(layerId)
+    } else if (action === "up" || action === "down") {
+      const layer = layers.find((entry) => entry.id === layerId)
+      if (!layer || layer.locked) return
+      const siblings = layers
+        .filter(
+          (entry) => (entry.parentId ?? null) === (layer.parentId ?? null)
+        )
+        .map((entry) => entry.id)
+      const from = siblings.indexOf(layerId)
+      const to = from + (action === "up" ? -1 : 1)
+      if (to >= 0 && to < siblings.length) {
+        siblings.splice(from, 1)
+        siblings.splice(to, 0, layerId)
+        reorderSiblings(layer.parentId ?? null, siblings)
+      }
+    } else if (action === "delete") {
       removeLayers(targetLayerIds)
       playUISound("action.deleteLayer")
+    } else if (action === "duplicate") {
+      duplicateLayers(targetLayerIds)
     } else {
       targetLayerIds.forEach((targetLayerId) => {
         resetLayerParams(targetLayerId)
@@ -565,6 +587,18 @@ export function LayerSidebar() {
     void handleMediaFile(file, "video")
   }
 
+  function handleModelChange(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0]
+
+    event.currentTarget.value = ""
+
+    if (!file) {
+      return
+    }
+
+    void handleMediaFile(file, "model")
+  }
+
   async function handleRelinkChange(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0]
     const target = relinkTargetRef.current
@@ -597,6 +631,7 @@ export function LayerSidebar() {
       }
 
       setLayerAsset(target.layerId, asset.id)
+      seedDurationFromMedia(getSeedableMediaDuration(asset))
       playUISound("action.relinkAsset")
     } catch (error) {
       setLayerRuntimeError(
@@ -619,13 +654,9 @@ export function LayerSidebar() {
     }
 
     if (relinkInputRef.current) {
-      relinkInputRef.current.accept = getAcceptForAssetKind(expectedKind)
+      relinkInputRef.current.accept = getAssetAccept(expectedKind)
       relinkInputRef.current.click()
     }
-  }
-
-  function handleReorder(nextLayers: EditorLayer[]) {
-    replaceState(nextLayers, selectedLayerId, hoveredLayerId, selectedLayerIds)
   }
 
   function handleSelectLayer(
@@ -645,6 +676,80 @@ export function LayerSidebar() {
 
     setLayersVisibility(targetLayerIds, visible)
   }
+
+  function renderLayerTree(
+    parentId: string | null,
+    frozen: boolean
+  ): ReactNode {
+    const siblings = layers.filter(
+      (layer) => (layer.parentId ?? null) === parentId
+    )
+    return (
+      <LayerListShell nested={parentId !== null}>
+        {siblings.map((layer) => {
+          const asset = layer.assetId
+            ? (assetsById.get(layer.assetId) ?? null)
+            : null
+          return (
+            <LayerListItem
+              key={layer.id}
+              onDragStart={layerDrag.start}
+              isDragging={layerDrag.preview?.id === layer.id}
+              dragPlacement={
+                layerDrag.preview?.target?.id === layer.id
+                  ? layerDrag.preview.target.placement
+                  : undefined
+              }
+              layer={layer}
+              asset={asset}
+              hasMissingAsset={Boolean(layer.assetId && !asset)}
+              isFloatingPanelDragging={frozen}
+              isSelected={selectedLayerIds.includes(layer.id)}
+              layerActionKey={layerActionSelectKeys[layer.id] ?? 0}
+              onLayerAction={handleLayerAction}
+              onRelinkPick={handleRelinkPick}
+              onSelectLayer={handleSelectLayer}
+              onSetLayerVisibility={handleSetLayerVisibility}
+            >
+              {isLayerGroup(layer) && layer.expanded
+                ? renderLayerTree(layer.id, frozen)
+                : null}
+            </LayerListItem>
+          )
+        })}
+      </LayerListShell>
+    )
+  }
+
+  const dragStatus = (
+    <output
+      aria-live="polite"
+      className={cn(
+        "sr-only"
+      )}
+    >
+      {layerDrag.preview?.message}
+    </output>
+  )
+
+  const groupButton = (
+    <IconButton
+      aria-label={
+        selectedLayerIds.length ? "Group selected layers" : "New group"
+      }
+      disabled={!canGroup}
+      onClick={handleGroup}
+      tooltip={
+        canGroup
+          ? "Group layers (⌘G / Ctrl+G)"
+          : "Select layers within the same group"
+      }
+      uiSound="none"
+      variant="ghost"
+    >
+      <GroupIcon height={14} width={14} />
+    </IconButton>
+  )
 
   return (
     <>
@@ -668,6 +773,14 @@ export function LayerSidebar() {
         ref={videoInputRef}
         type="file"
       />
+      <input
+        accept={getAssetAccept("model")}
+        className="hidden"
+        data-testid="model-input"
+        onChange={handleModelChange}
+        ref={modelInputRef}
+        type="file"
+      />
 
       <aside
         className={cn(
@@ -679,7 +792,7 @@ export function LayerSidebar() {
         <GlassPanel
           data-layer-sidebar-panel="true"
           className={cn(
-            "pointer-events-auto relative flex flex-col gap-[var(--ds-space-1)] p-0 max-h-[min(56vh,420px)] w-full",
+            "pointer-events-auto relative flex flex-col gap-[var(--ds-space-1)] overflow-visible p-0 max-h-[min(56vh,420px)] w-full",
             !mobilePanelVisible && "pointer-events-none"
           )}
           variant="panel"
@@ -706,6 +819,7 @@ export function LayerSidebar() {
               >
                 <LayoutIcon height={14} width={14} />
               </IconButton>
+              {groupButton}
               <LayerPicker
                 className="pointer-events-auto"
                 onSelect={handleAddLayer}
@@ -713,37 +827,13 @@ export function LayerSidebar() {
             </div>
           </div>
 
-          <Reorder.Group
-            axis="y"
-            as="ul"
-            className="flex max-h-[min(44vh,320px)] flex-col gap-0.5 overflow-y-auto p-1"
-            onReorder={handleReorder}
-            values={layers}
-          >
-            {layers.map((layer) => {
-              const asset = layer.assetId
-                ? (assetsById.get(layer.assetId) ?? null)
-                : null
-              const hasMissingAsset = Boolean(layer.assetId && !asset)
-              const isSelected = selectedLayerIds.includes(layer.id)
-
-              return (
-                <LayerListItem
-                  asset={asset}
-                  hasMissingAsset={hasMissingAsset}
-                  isFloatingPanelDragging={false}
-                  isSelected={isSelected}
-                  key={layer.id}
-                  layer={layer}
-                  layerActionKey={layerActionSelectKeys[layer.id] ?? 0}
-                  onLayerAction={handleLayerAction}
-                  onRelinkPick={handleRelinkPick}
-                  onSelectLayer={handleSelectLayer}
-                  onSetLayerVisibility={handleSetLayerVisibility}
-                />
-              )
-            })}
-          </Reorder.Group>
+          {renderLayerTree(null, false)}
+          {dragStatus}
+          {groupError && (
+            <output className="px-3 pb-2 text-xs text-[var(--ds-color-text-muted)]">
+              {groupError}
+            </output>
+          )}
         </GlassPanel>
       </aside>
 
@@ -758,13 +848,14 @@ export function LayerSidebar() {
           {({ dragHandleProps, suppressResize: _suppressResize }) => (
             <GlassPanel
               data-layer-sidebar-panel="true"
-              className="relative flex w-[284px] flex-col gap-[var(--ds-space-1)] p-0"
+              className="relative flex w-[284px] flex-col gap-[var(--ds-space-1)] overflow-visible p-0"
               variant="panel"
             >
               <div className="flex min-h-11 items-center justify-between border-[var(--ds-border-divider)] border-b px-3">
                 <div className="inline-flex items-center gap-2">
                   <IconButton
                     aria-label="Move layers panel"
+                    tooltipDisabled
                     className="h-7 w-7 cursor-grab text-[var(--ds-color-text-muted)] active:cursor-grabbing"
                     variant="ghost"
                     {...dragHandleProps}
@@ -793,6 +884,7 @@ export function LayerSidebar() {
                   >
                     <LayoutIcon height={14} width={14} />
                   </IconButton>
+                  {groupButton}
                   <LayerPicker
                     className="pointer-events-auto"
                     onSelect={handleAddLayer}
@@ -800,35 +892,13 @@ export function LayerSidebar() {
                 </div>
               </div>
 
-              <LayerListShell
-                isFloatingPanelDragging={shouldFreezeDesktopLayerList}
-                onReorder={handleReorder}
-                values={layers}
-              >
-                {layers.map((layer) => {
-                  const asset = layer.assetId
-                    ? (assetsById.get(layer.assetId) ?? null)
-                    : null
-                  const hasMissingAsset = Boolean(layer.assetId && !asset)
-                  const isSelected = selectedLayerIds.includes(layer.id)
-
-                  return (
-                    <LayerListItem
-                      asset={asset}
-                      hasMissingAsset={hasMissingAsset}
-                      isFloatingPanelDragging={shouldFreezeDesktopLayerList}
-                      isSelected={isSelected}
-                      key={layer.id}
-                      layer={layer}
-                      layerActionKey={layerActionSelectKeys[layer.id] ?? 0}
-                      onLayerAction={handleLayerAction}
-                      onRelinkPick={handleRelinkPick}
-                      onSelectLayer={handleSelectLayer}
-                      onSetLayerVisibility={handleSetLayerVisibility}
-                    />
-                  )
-                })}
-              </LayerListShell>
+              {renderLayerTree(null, shouldFreezeDesktopLayerList)}
+              {dragStatus}
+              {groupError && (
+                <output className="px-3 pb-2 text-xs text-[var(--ds-color-text-muted)]">
+                  {groupError}
+                </output>
+              )}
             </GlassPanel>
           )}
         </FloatingDesktopPanel>

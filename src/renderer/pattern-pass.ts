@@ -1,11 +1,12 @@
 import * as THREE from "three/webgpu"
-import { bloom } from "three/examples/jsm/tsl/display/BloomNode.js"
+import { parseSvgPalette } from "@/renderer/svg-palette"
 import {
   clamp,
   float,
   floor,
   mix,
   mod,
+  pow,
   select,
   texture as tslTexture,
   type TSLNode,
@@ -16,14 +17,29 @@ import {
   vec4,
 } from "three/tsl"
 import {
+  buildMotifAtlas,
   buildPatternAtlas,
+  loadMotifImage,
+  loadRecoloredMotif,
+  MAX_PATTERN_MOTIFS,
   type PatternPreset,
 } from "@/renderer/pattern-atlas"
+import { BloomCompositor } from "@/renderer/dual-filter-bloom"
 import { PassNode } from "@/renderer/pass-node"
 import type { LayerParameterValues } from "@/types/editor"
 
 type Node = TSLNode
-type PatternColorMode = "custom" | "monochrome" | "quantized" | "source"
+type PatternColorMode = "custom" | "monochrome" | "original" | "quantized" | "source"
+type PatternSource = PatternPreset | "custom"
+
+export class MotifLoadError extends Error {
+  readonly failed: number
+
+  constructor(failed: number) {
+    super(`${failed} pattern motifs could not be loaded`)
+    this.failed = failed
+  }
+}
 
 function clamp01(value: number): number {
   return Math.max(0, Math.min(1, value))
@@ -66,7 +82,6 @@ export class PatternPass extends PassNode {
   private atlasTexture: THREE.CanvasTexture | null = null
   private atlasTextureNodes: Node[] = []
   private bloomEnabled = false
-  private bloomNode: ReturnType<typeof bloom> | null = null
   private readonly bloomIntensityUniform: Node
   private readonly bloomRadiusUniform: Node
   private readonly bloomSoftnessUniform: Node
@@ -95,8 +110,14 @@ export class PatternPass extends PassNode {
   private atlasBuildRequestId = 0
   private atlasPending = false
   private currentCellSize = 12
-  private currentPreset: PatternPreset = "bars"
+  private currentPreset: PatternSource = "bars"
   private needsRefresh = false
+  private motifUrls: string[] = []
+  private motifsKey = ""
+  private motifPalette = ""
+  private readonly motifImages = new Map<string, Promise<HTMLImageElement>>()
+  private motifCount = 0
+  private motifsFailed = 0
 
   constructor(layerId: string) {
     super(layerId)
@@ -122,7 +143,7 @@ export class PatternPass extends PassNode {
     this.monoGreenUniform = uniform(0.96)
     this.monoBlueUniform = uniform(0.94)
     this.numPatternsUniform = uniform(1)
-    this.rebuildAtlas()
+    void this.rebuildAtlas().catch(() => undefined)
     this.rebuildEffectNode()
   }
 
@@ -133,8 +154,9 @@ export class PatternPass extends PassNode {
     time: number,
     delta: number,
   ): void {
+    const source = this.resolveEffectSource(inputTexture)
     for (const sourceTextureNode of this.sourceTextureNodes) {
-      sourceTextureNode.value = inputTexture
+      sourceTextureNode.value = source
     }
 
     if (this.atlasTexture) {
@@ -148,9 +170,14 @@ export class PatternPass extends PassNode {
   }
 
   override updateParams(params: LayerParameterValues): void {
+    this.updateSourceMode(params)
     const nextCellSize =
       typeof params.cellSize === "number" ? Math.max(4, Math.round(params.cellSize)) : 12
     const nextPreset = this.resolvePreset(params.preset)
+    const nextMotifPalette =
+      typeof params.motifPalette === "string" ? params.motifPalette : ""
+    const motifPaletteChanged = nextMotifPalette !== this.motifPalette
+    this.motifPalette = nextMotifPalette
     const nextColorMode = this.resolveColorMode(params.colorMode)
     const nextBgOpacity =
       typeof params.bgOpacity === "number" ? clamp01(params.bgOpacity) : 0
@@ -181,7 +208,7 @@ export class PatternPass extends PassNode {
     this.bloomSoftnessUniform.value = nextBloomSoftness
     this.bloomThresholdUniform.value = nextBloomThreshold
     this.cellSizeUniform.value = nextCellSize
-    this.colorModeUniform.value = this.getColorModeValue(nextColorMode)
+    this.colorModeUniform.value = this.getColorModeValue(nextColorMode, nextPreset)
     this.customColorCountUniform.value = nextCustomColorCount
     this.customLuminanceBiasUniform.value = nextCustomLuminanceBias
     this.invertUniform.value = params.invert === true ? 1 : 0
@@ -210,7 +237,9 @@ export class PatternPass extends PassNode {
     )
 
     const needsAtlasRebuild =
-      nextCellSize !== this.currentCellSize || nextPreset !== this.currentPreset
+      nextCellSize !== this.currentCellSize ||
+      nextPreset !== this.currentPreset ||
+      (motifPaletteChanged && nextPreset === "custom")
 
     this.currentCellSize = nextCellSize
     this.currentPreset = nextPreset
@@ -220,16 +249,42 @@ export class PatternPass extends PassNode {
       this.rebuildEffectNode()
     }
 
-    if (this.bloomNode) {
-      this.bloomNode.strength.value = nextBloomIntensity
-      this.bloomNode.radius.value = this.normalizeBloomRadius(nextBloomRadius)
-      this.bloomNode.threshold.value = nextBloomThreshold
-      this.bloomNode.smoothWidth.value = this.normalizeBloomSoftness(nextBloomSoftness)
-    }
+    this.applyBloomSettings()
 
     if (needsAtlasRebuild) {
-      this.rebuildAtlas()
+      void this.rebuildAtlas().catch(() => undefined)
     }
+  }
+
+  setMotifs(urls: readonly string[]): Promise<void> {
+    const nextUrls = urls.slice(0, MAX_PATTERN_MOTIFS)
+    const nextKey = nextUrls.join("\n")
+
+    if (nextKey === this.motifsKey) {
+      return this.motifsFailed > 0
+        ? Promise.reject(new MotifLoadError(this.motifsFailed))
+        : Promise.resolve()
+    }
+
+    this.motifsKey = nextKey
+    this.motifUrls = nextUrls
+    this.motifsFailed = 0
+
+    for (const key of this.motifImages.keys()) {
+      if (!nextUrls.includes(key.split("\n")[0] ?? key)) {
+        this.motifImages.delete(key)
+      }
+    }
+
+    if (this.currentPreset !== "custom") {
+      return Promise.resolve()
+    }
+
+    return this.rebuildAtlas()
+  }
+
+  getMotifCount(): number {
+    return this.motifCount
   }
 
   override updateLogicalSize(width: number, height: number): void {
@@ -242,10 +297,18 @@ export class PatternPass extends PassNode {
   }
 
   override dispose(): void {
-    this.disposeBloomNode()
     this.placeholder.dispose()
     this.atlasTexture?.dispose()
     super.dispose()
+  }
+
+  private applyBloomSettings(): void {
+    this.bloomCompositor?.applySettings({
+      intensity: this.bloomIntensityUniform.value as number,
+      radius: this.bloomRadiusUniform.value as number,
+      softness: this.bloomSoftnessUniform.value as number,
+      threshold: this.bloomThresholdUniform.value as number,
+    })
   }
 
   protected override buildEffectNode(): Node {
@@ -253,8 +316,12 @@ export class PatternPass extends PassNode {
       return this.inputNode
     }
 
-    this.disposeBloomNode()
-    this.bloomNode = null
+    const motifMode = this.currentPreset === "custom"
+
+    if (motifMode && this.motifCount === 0) {
+      return this.inputNode
+    }
+
     this.sourceTextureNodes = []
     this.atlasTextureNodes = []
 
@@ -321,13 +388,39 @@ export class PatternPass extends PassNode {
         float(1).sub(luma),
         luma,
       )
-      const patternIndex = floor(
-        clamp(
-          adjustedLuma.mul(this.numPatternsUniform.sub(float(1))),
-          float(0),
-          this.numPatternsUniform.sub(float(1)),
-        ),
+      const linearTone = clamp(
+        float(sampledColor.r)
+          .mul(float(0.2126))
+          .add(float(sampledColor.g).mul(float(0.7152)))
+          .add(float(sampledColor.b).mul(float(0.0722))),
+        float(0),
+        float(1),
       )
+      const toneLuma = select(
+        linearTone.lessThanEqual(float(0.0031308)),
+        linearTone.mul(float(12.92)),
+        pow(linearTone, float(1 / 2.4)).mul(float(1.055)).sub(float(0.055)),
+      )
+      const adjustedTone = select(
+        this.invertUniform.greaterThan(float(0.5)),
+        float(1).sub(toneLuma),
+        toneLuma,
+      )
+      const patternIndex = motifMode
+        ? floor(
+            clamp(
+              float(1).sub(adjustedTone).mul(this.numPatternsUniform),
+              float(0),
+              this.numPatternsUniform.sub(float(1)),
+            ),
+          )
+        : floor(
+            clamp(
+              adjustedLuma.mul(this.numPatternsUniform.sub(float(1))),
+              float(0),
+              this.numPatternsUniform.sub(float(1)),
+            ),
+          )
       const atlasUv = vec2(
         patternIndex
           .mul(this.cellSizeUniform)
@@ -336,7 +429,13 @@ export class PatternPass extends PassNode {
           .div(this.numPatternsUniform.mul(this.cellSizeUniform)),
         localCellPixel.y.add(float(0.5)).div(this.cellSizeUniform),
       )
-      const patternMask = float(this.trackAtlasTextureNode(atlasUv).r)
+      const atlasSample = this.trackAtlasTextureNode(atlasUv)
+      const patternMask = motifMode ? float(atlasSample.a) : float(atlasSample.r)
+      const motifColor = vec3(
+        float(atlasSample.r),
+        float(atlasSample.g),
+        float(atlasSample.b),
+      )
       const quantized = floor(sourceColor.mul(quantizeLevels).add(vec3(0.5, 0.5, 0.5))).mul(
         inverseQuantizeLevels,
       )
@@ -392,7 +491,7 @@ export class PatternPass extends PassNode {
           ),
         ),
       )
-      const patternColor = select(
+      const tintedColor = select(
         this.colorModeUniform.lessThan(float(0.5)),
         sourceColor,
         select(
@@ -405,9 +504,11 @@ export class PatternPass extends PassNode {
           ),
         ),
       )
+      const keepsMotifColor = this.colorModeUniform.greaterThan(float(3.5))
+      const patternColor = select(keepsMotifColor, motifColor, tintedColor)
       const sourceBackground = sourceColor.mul(this.bgOpacityUniform)
       const backgroundColor = select(
-        this.colorModeUniform.lessThan(float(0.5)),
+        this.colorModeUniform.lessThan(float(0.5)).or(keepsMotifColor),
         sourceBackground,
         select(
           this.colorModeUniform.lessThan(float(2.5)),
@@ -425,27 +526,15 @@ export class PatternPass extends PassNode {
       return baseSample
     }
 
-    this.bloomNode = bloom(
-      vec4(baseSample.rgb, float(1)),
-      this.bloomIntensityUniform.value as number,
-      this.normalizeBloomRadius(this.bloomRadiusUniform.value as number),
-      this.bloomThresholdUniform.value as number,
-    )
-    this.bloomNode.smoothWidth.value = this.normalizeBloomSoftness(
-      this.bloomSoftnessUniform.value as number,
-    )
+    if (!this.bloomCompositor) {
+      this.bloomCompositor = new BloomCompositor()
+    }
 
-    return vec4(
-      clamp(
-        baseSample.rgb.add(this.getBloomTextureNode().rgb),
-        vec3(float(0), float(0), float(0)),
-        vec3(float(1), float(1), float(1)),
-      ),
-      float(1),
-    )
+    this.applyBloomSettings()
+    return this.bloomCompositor.build(baseSample.rgb)
   }
 
-  private getColorModeValue(colorMode: PatternColorMode): number {
+  private getColorModeValue(colorMode: PatternColorMode, preset: PatternSource): number {
     switch (colorMode) {
       case "quantized":
         return 1
@@ -453,82 +542,110 @@ export class PatternPass extends PassNode {
         return 2
       case "custom":
         return 3
+      case "original":
+        return preset === "custom" ? 4 : 0
       default:
         return 0
     }
   }
 
-  private rebuildAtlas(): void {
+  private rebuildAtlas(): Promise<void> {
     const requestId = ++this.atlasBuildRequestId
+    const cellSize = this.currentCellSize
     this.atlasPending = true
 
-    void buildPatternAtlas(this.currentPreset, this.currentCellSize)
-      .then((atlasTexture) => {
+    const build =
+      this.currentPreset === "custom"
+        ? this.buildMotifAtlasFromUrls(cellSize)
+        : buildPatternAtlas(this.currentPreset, cellSize).then((texture) => ({
+            failed: 0,
+            motifs: 0,
+            texture: texture as THREE.CanvasTexture | null,
+          }))
+
+    return build
+      .then(({ failed, motifs, texture }) => {
         if (requestId !== this.atlasBuildRequestId) {
-          atlasTexture.dispose()
+          texture?.dispose()
           return
         }
 
         this.atlasTexture?.dispose()
-        this.atlasTexture = atlasTexture
-        this.numPatternsUniform.value = atlasTexture.image.width / this.currentCellSize
+        this.atlasTexture = texture
+        this.motifCount = motifs
+        this.motifsFailed = failed
+        this.numPatternsUniform.value = texture
+          ? texture.image.width / cellSize
+          : 1
         this.atlasPending = false
         this.needsRefresh = true
         this.rebuildEffectNode()
+
+        if (failed > 0) {
+          throw new MotifLoadError(failed)
+        }
       })
-      .catch(() => {
+      .catch((error: unknown) => {
         if (requestId !== this.atlasBuildRequestId) {
           return
         }
 
         this.atlasPending = false
         this.needsRefresh = true
+        throw error
       })
   }
 
+  private async buildMotifAtlasFromUrls(cellSize: number): Promise<{
+    failed: number
+    motifs: number
+    texture: THREE.CanvasTexture | null
+  }> {
+    for (const key of this.motifImages.keys()) {
+      const separator = key.indexOf("\n")
+      if (separator >= 0 && key.slice(separator + 1) !== this.motifPalette) {
+        this.motifImages.delete(key)
+      }
+    }
+    const results = await Promise.allSettled(
+      this.motifUrls.map((url) => {
+        const palette = this.motifPalette
+        const key = palette ? `${url}\n${palette}` : url
+        let image = this.motifImages.get(key)
+        if (!image) {
+          image = palette
+            ? loadRecoloredMotif(url, parseSvgPalette(palette))
+            : loadMotifImage(url)
+          this.motifImages.set(key, image)
+          image.catch(() => this.motifImages.delete(key))
+        }
+        return image
+      }),
+    )
+    const images = results.flatMap((result) =>
+      result.status === "fulfilled" ? [result.value] : [],
+    )
+
+    return {
+      failed: results.length - images.length,
+      motifs: images.length,
+      texture: images.length > 0 ? buildMotifAtlas(images, cellSize) : null,
+    }
+  }
+
   private resolveColorMode(value: unknown): PatternColorMode {
-    return value === "quantized" || value === "monochrome" || value === "custom"
+    return value === "quantized" ||
+      value === "monochrome" ||
+      value === "custom" ||
+      value === "original"
       ? value
       : "source"
   }
 
-  private resolvePreset(value: unknown): PatternPreset {
-    return value === "candles" || value === "shapes" ? value : "bars"
-  }
-
-  private normalizeBloomRadius(value: number): number {
-    return clamp01(value / 24)
-  }
-
-  private normalizeBloomSoftness(value: number): number {
-    return Math.max(0.001, value * 0.25)
-  }
-
-  private disposeBloomNode(): void {
-    ;(this.bloomNode as { dispose?: () => void } | null)?.dispose?.()
-  }
-
-  private getBloomTextureNode(): Node {
-    const bloomNode = this.bloomNode as
-      | ({
-          getTexture?: () => Node
-          getTextureNode?: () => Node
-        } & object)
-      | null
-
-    if (!bloomNode) {
-      throw new Error("Bloom node is not initialized")
-    }
-
-    if ("getTextureNode" in bloomNode && typeof bloomNode.getTextureNode === "function") {
-      return bloomNode.getTextureNode()
-    }
-
-    if ("getTexture" in bloomNode && typeof bloomNode.getTexture === "function") {
-      return bloomNode.getTexture()
-    }
-
-    throw new Error("Bloom node does not expose a texture getter")
+  private resolvePreset(value: unknown): PatternSource {
+    return value === "candles" || value === "shapes" || value === "custom"
+      ? value
+      : "bars"
   }
 
   private trackAtlasTextureNode(uvNode: Node): Node {

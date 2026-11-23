@@ -17,13 +17,14 @@ export type ColorCurve = _ColorCurve
 export type ColorCurveChannelId = _ColorCurveChannelId
 export type SceneColorCurves = _SceneColorCurves
 
-export const LAYER_KINDS = ["source", "effect", "model"] as const
+export const LAYER_KINDS = ["source", "effect", "model", "group"] as const
 export type LayerKind = (typeof LAYER_KINDS)[number]
 
 export const SOURCE_LAYER_TYPES = [
   "image",
   "video",
   "gradient",
+  "shape",
   "text",
   "fluid",
   "pixel-trail",
@@ -34,7 +35,11 @@ export const SOURCE_LAYER_TYPES = [
 export type SourceLayerType = (typeof SOURCE_LAYER_TYPES)[number]
 
 export const EFFECT_LAYER_TYPES = [
+  "photographic-cells",
+  "displaced-rings",
+  "annotations",
   "ascii",
+  "blob-tracking",
   "bloom",
   "circuit-bent",
   "directional-blur",
@@ -44,6 +49,19 @@ export const EFFECT_LAYER_TYPES = [
   "plotter",
   "posterize",
   "threshold",
+  "gradient-map",
+  "lumen-print",
+  "grain",
+  "signal-rot",
+  "dot-grid",
+  "erosion",
+  "relief",
+  "flares",
+  "focus-blur",
+  "glass",
+  "connected-dots",
+  "photocopy",
+  "outline",
   "crt",
   "dithering",
   "halftone",
@@ -63,7 +81,11 @@ export type EffectLayerType = (typeof EFFECT_LAYER_TYPES)[number]
 export const MODEL_LAYER_TYPES = ["model"] as const
 export type ModelLayerType = (typeof MODEL_LAYER_TYPES)[number]
 
-export type LayerType = SourceLayerType | EffectLayerType | ModelLayerType
+export type LayerType =
+  | SourceLayerType
+  | EffectLayerType
+  | ModelLayerType
+  | "group"
 
 export const BLEND_MODES = [
   "normal",
@@ -119,7 +141,51 @@ export interface MaskConfig {
   source: MaskSource
 }
 
-export const ASSET_KINDS = ["image", "video", "model"] as const
+export const LAYER_MASK_SHAPES = [
+  "none",
+  "linear",
+  "radial",
+  "ellipse",
+  "rectangle",
+  "brush",
+  "depth",
+] as const
+export type LayerMaskShape = (typeof LAYER_MASK_SHAPES)[number]
+
+export const LAYER_MASK_SCOPES = ["effect", "content"] as const
+export type LayerMaskScope = (typeof LAYER_MASK_SCOPES)[number]
+
+export interface LayerMask {
+  shape: LayerMaskShape
+  scope: LayerMaskScope
+  enabled: boolean
+  invert: boolean
+  center: [number, number]
+  size: [number, number]
+  rotation: number
+  feather: number
+  paint: string
+}
+
+export const DEFAULT_LAYER_MASK: LayerMask = {
+  shape: "none",
+  scope: "effect",
+  enabled: true,
+  invert: false,
+  center: [0, 0],
+  size: [0.5, 0.5],
+  rotation: 0,
+  feather: 0.01,
+  paint: "",
+}
+
+export const ASSET_KINDS = [
+  "image",
+  "video",
+  "model",
+  "environment",
+  "audio",
+] as const
 export type AssetKind = (typeof ASSET_KINDS)[number]
 
 export type Vector2 = { x: number; y: number }
@@ -149,6 +215,12 @@ export type ParameterVisibilityCondition = {
     }
   | {
       gte: number
+    }
+  | {
+      notEquals: boolean | number | string
+    }
+  | {
+      oneOf: readonly (boolean | number | string)[]
     }
 )
 
@@ -199,7 +271,9 @@ export type TextParameterDefinition = ParameterDefinitionBase<
   "text",
   string
 > & {
+  interpolate?: "gradient"
   maxLength?: number
+  multiline?: boolean
 }
 
 export type Vec2ParameterDefinition = ParameterDefinitionBase<
@@ -209,6 +283,7 @@ export type Vec2ParameterDefinition = ParameterDefinitionBase<
   max?: number
   min?: number
   step?: number
+  ui?: "fields"
 }
 
 export type Vec3ParameterDefinition = ParameterDefinitionBase<
@@ -253,7 +328,14 @@ export const DEFAULT_MASK_CONFIG: MaskConfig = {
 }
 
 export interface BaseLayer {
+  /** Original data for a layer unavailable in this version; never rendered. */
+  unavailableLayer?: Record<string, unknown>
+
+  parentId?: string | null
   assetId: string | null
+  depthAssetId?: string | null
+  environmentAssetId?: string | null
+  patternAssetIds?: string[]
   blendMode: BlendMode
   compositeMode: LayerCompositeMode
   expanded: boolean
@@ -262,6 +344,7 @@ export interface BaseLayer {
   fluidInteractionEvents?: FluidInteractionEvent[]
   kind: LayerKind
   locked: boolean
+  mask?: LayerMask | null
   maskConfig: MaskConfig
   name: string
   opacity: number
@@ -287,9 +370,16 @@ export interface ModelLayer extends BaseLayer {
   type: "model"
 }
 
-export type EditorLayer = SourceLayer | EffectLayer | ModelLayer
+export interface GroupLayer extends BaseLayer {
+  kind: "group"
+  type: "group"
+}
+
+export type EditorLayer = SourceLayer | EffectLayer | ModelLayer | GroupLayer
 
 export type AssetStatus = "idle" | "loading" | "ready" | "error"
+
+export type AssetSource = "local" | "remote"
 
 export interface EditorAsset {
   createdAt: string
@@ -300,6 +390,7 @@ export interface EditorAsset {
   kind: AssetKind
   mimeType: string
   sizeBytes: number
+  source: AssetSource
   status: AssetStatus
   url: string
   width: number | null
@@ -314,7 +405,10 @@ export type LayerAnimatableProperty =
   | "hue"
   | "saturation"
   | "visible"
-export type AnimatableValueType = Exclude<ParameterType, "text"> | "boolean"
+export type AnimatableValueType =
+  | Exclude<ParameterType, "text">
+  | "boolean"
+  | "gradient"
 
 export type AnimatedPropertyBinding =
   | {
@@ -342,7 +436,6 @@ export interface TimelineTrack {
   easing?: KeyframeEasing
   enabled: boolean
   id: string
-  /** @deprecated Use `easing` instead. Kept for backward compat with old project files. */
   interpolation?: TimelineInterpolation
   keyframes: TimelineKeyframe[]
   layerId: string
@@ -357,6 +450,43 @@ export interface TimelineStateSnapshot {
   selectedKeyframeIds: string[]
   selectedTrackId: string | null
   tracks: TimelineTrack[]
+}
+
+export const AUDIO_BAND_IDS = ["bass", "mid", "high", "level"] as const
+export type AudioBandId = (typeof AUDIO_BAND_IDS)[number]
+
+export interface AudioBandConfig {
+  attackMs: number
+  gainDb: number
+  highHz: number
+  lowHz: number
+  releaseMs: number
+}
+
+export type AudioSourceRef =
+  | { assetId: string; kind: "asset" }
+  | { kind: "video-layer"; layerId: string }
+
+export type AudioLinkComponent = "all" | "x" | "y" | "z"
+
+export interface AudioLink {
+  band: AudioBandId
+  binding: AnimatedPropertyBinding
+  component?: AudioLinkComponent
+  enabled: boolean
+  id: string
+  layerId: string
+  outMax: number
+  outMin: number
+  threshold?: number
+  quantize?: boolean
+}
+
+export interface EditorAudioSnapshot {
+  bands: Record<AudioBandId, AudioBandConfig>
+  links: AudioLink[]
+  offsetSeconds: number
+  source: AudioSourceRef | null
 }
 
 export type SidebarView = "properties" | "scene"
@@ -410,6 +540,25 @@ export interface SceneConfig {
   quantizeEnabled: boolean
   quantizeLevels: number
   colorMap: { stops: { position: number; color: string }[] } | null
+  grid?: LayoutGrid
+}
+
+export interface LayoutGrid {
+  visible: boolean
+  columns: number
+  rows: number
+  gap: number
+  margin: number
+  opacity: number
+}
+
+export const DEFAULT_LAYOUT_GRID: LayoutGrid = {
+  visible: false,
+  columns: 12,
+  rows: 0,
+  gap: 20,
+  margin: 40,
+  opacity: 0.06,
 }
 
 export const DEFAULT_SCENE_CONFIG: SceneConfig = {
@@ -476,6 +625,9 @@ export interface EditorStateSnapshot {
 }
 
 export interface EditorHistorySnapshot {
+  sceneConfig: SceneConfig
+  selectedLayerIds?: string[]
+  audio: EditorAudioSnapshot
   hoveredLayerId: string | null
   layers: EditorLayer[]
   selectedLayerId: string | null
@@ -514,6 +666,13 @@ export interface PresetAssetReference {
   fileName: string
   id: string
   kind: AssetKind
+  duration?: number | null
+  height?: number | null
+  mimeType?: string
+  sha256?: string
+  sizeBytes?: number
+  url?: string
+  width?: number | null
 }
 
 export interface ProjectPresetConfig {

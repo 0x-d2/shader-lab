@@ -1,4 +1,5 @@
 import type {
+  AnimatableValueType,
   LayerParameterValues,
   ParameterDefinition,
   ParameterDefinitions,
@@ -42,10 +43,33 @@ export function getParameterDefinition(
 
 export function isParameterAnimatable(definition: ParameterDefinition): boolean {
   if (definition.type === "text") {
-    return false
+    return definition.interpolate === "gradient" && (definition.animatable ?? true)
   }
 
   return definition.animatable ?? true
+}
+
+export function getAnimatableValueType(
+  definition: ParameterDefinition,
+): AnimatableValueType | null {
+  if (!isParameterAnimatable(definition)) {
+    return null
+  }
+
+  return definition.type === "text" ? "gradient" : definition.type
+}
+
+export function isParameterAudioModulatable(definition: ParameterDefinition): boolean {
+  if (
+    definition.type === "text" ||
+    definition.type === "color" ||
+    definition.type === "select" ||
+    definition.type === "vec3"
+  ) {
+    return false
+  }
+
+  return isParameterAnimatable(definition)
 }
 
 export function isParameterValueEqual(left: ParameterValue, right: ParameterValue): boolean {
@@ -67,9 +91,21 @@ export function valueSignature(value: ParameterValue): string {
   return String(value)
 }
 
+function compareKeys(leftKey: string, rightKey: string): number {
+  if (leftKey < rightKey) {
+    return -1
+  }
+
+  if (leftKey > rightKey) {
+    return 1
+  }
+
+  return 0
+}
+
 export function parameterValuesSignature(values: LayerParameterValues): string {
   return Object.entries(values)
-    .sort(([leftKey], [rightKey]) => leftKey.localeCompare(rightKey))
+    .sort(([leftKey], [rightKey]) => compareKeys(leftKey, rightKey))
     .map(([key, value]) => `${key}:${valueSignature(value)}`)
     .join("|")
 }

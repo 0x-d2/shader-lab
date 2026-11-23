@@ -1,6 +1,10 @@
+import {
+  getMaskParameterDefinition,
+  isMaskParamKey,
+} from "@/lib/editor/mask-animation"
 import { create } from "zustand"
 import { advanceProjectTimeline } from "@/renderer/project-clock"
-import { getDefaultProjectTimeline } from "@/lib/editor/default-project"
+import { clampDuration, MIN_DURATION } from "@/lib/editor/timeline-duration"
 import {
   type KeyframeEasing,
   cloneEasing,
@@ -20,8 +24,8 @@ import type {
 } from "@/types/editor"
 import {
   cloneParameterValue,
+  getAnimatableValueType,
   getParameterDefinition,
-  isParameterAnimatable,
 } from "@/lib/editor/parameter-schema"
 import { getLayerDefinition } from "@/lib/editor/config/layer-registry"
 
@@ -61,6 +65,7 @@ export interface TimelineStoreActions {
   ) => void
   advance: (delta: number) => void
   clearLayerTracks: (layerId: string) => void
+  duplicateLayerTracks: (sourceLayerId: string, targetLayerId: string) => void
   getTrackForBinding: (
     layerId: string,
     binding: AnimatedPropertyBinding,
@@ -83,6 +88,7 @@ export interface TimelineStoreActions {
   ) => void
   removeKeyframe: (trackId: string, keyframeId: string) => void
   removeSelectedKeyframes: () => void
+  seedDurationFromMedia: (durationSeconds: number | null | undefined) => void
   setCurrentTime: (time: number) => void
   setDuration: (duration: number) => void
   setLoop: (loop: boolean) => void
@@ -111,19 +117,7 @@ export interface TimelineStoreActions {
 
 export type TimelineStore = TimelineStoreState & TimelineStoreActions
 
-const DEFAULT_DURATION = 6
-const MIN_DURATION = 0.25
-const MAX_DURATION = 120
 const TIME_EPSILON = 1 / 240
-const DEFAULT_PROJECT_TIMELINE = getDefaultProjectTimeline()
-
-function clampDuration(duration: number): number {
-  if (!Number.isFinite(duration)) {
-    return DEFAULT_DURATION
-  }
-
-  return Math.min(MAX_DURATION, Math.max(MIN_DURATION, duration))
-}
 
 function clampTime(time: number, duration: number): number {
   if (!Number.isFinite(time)) {
@@ -193,15 +187,13 @@ export function createParamBinding(
   layer: EditorLayer,
   key: string,
 ): AnimatedPropertyBinding | null {
-  const definition = getParameterDefinition(getLayerDefinition(layer.type).params, key)
+  const definition = isMaskParamKey(key)
+    ? getMaskParameterDefinition(layer.mask?.shape ?? "none", key)
+    : getParameterDefinition(getLayerDefinition(layer.type).params, key)
 
-  if (
-    !(
-      definition &&
-      isAnimatableValueType(definition.type) &&
-      isParameterAnimatable(definition)
-    )
-  ) {
+  const valueType = definition ? getAnimatableValueType(definition) : null
+
+  if (!(definition && valueType)) {
     return null
   }
 
@@ -209,7 +201,7 @@ export function createParamBinding(
     key,
     kind: "param",
     label: definition.label,
-    valueType: definition.type,
+    valueType,
   }
 }
 
@@ -237,9 +229,6 @@ function cloneTrack(track: TimelineTrack): TimelineTrack {
   return clone
 }
 
-/**
- * Migrate a track from the old string-based interpolation to the new easing field.
- */
 function migrateTrackEasing(track: TimelineTrack): TimelineTrack {
   const fallbackEasing = track.easing
     ?? (track.interpolation ? migrateInterpolationToEasing(track.interpolation) : null)
@@ -357,15 +346,15 @@ function createSelectionState(
 
 export const useTimelineStore = create<TimelineStore>((set, get) => ({
   currentTime: 0,
-  duration: DEFAULT_PROJECT_TIMELINE.duration,
+  duration: 10,
   frozen: false,
   isPlaying: true,
   lastRenderedClockTime: 0,
-  loop: DEFAULT_PROJECT_TIMELINE.loop,
+  loop: true,
   selectedKeyframeId: null,
   selectedKeyframeIds: [],
   selectedTrackId: null,
-  tracks: DEFAULT_PROJECT_TIMELINE.tracks,
+  tracks: [],
 
   setFrozen: (frozen) => {
     set((state) => ({
@@ -399,22 +388,31 @@ export const useTimelineStore = create<TimelineStore>((set, get) => ({
     set({ loop })
   },
 
+  seedDurationFromMedia: (durationSeconds) => {
+    if (
+      !(
+        typeof durationSeconds === "number" &&
+        Number.isFinite(durationSeconds) &&
+        durationSeconds > 0
+      )
+    ) {
+      return
+    }
+
+    get().setDuration(durationSeconds)
+  },
+
   setDuration: (duration) => {
     set((state) => {
       const nextDuration = clampDuration(duration)
 
+      if (nextDuration === state.duration) {
+        return state
+      }
+
       return {
         currentTime: clampTime(state.currentTime, nextDuration),
         duration: nextDuration,
-        tracks: state.tracks.map((track) => ({
-          ...track,
-          keyframes: sortKeyframes(
-            track.keyframes.map((keyframe) => ({
-              ...keyframe,
-              time: clampTime(keyframe.time, nextDuration),
-            })),
-          ),
-        })),
       }
     })
   },
@@ -932,6 +930,34 @@ export const useTimelineStore = create<TimelineStore>((set, get) => ({
     })
   },
 
+  duplicateLayerTracks: (sourceLayerId, targetLayerId) => {
+    set((state) => {
+      const sourceTracks = state.tracks.filter(
+        (track) => track.layerId === sourceLayerId,
+      )
+
+      if (sourceTracks.length === 0) {
+        return state
+      }
+
+      const duplicatedTracks = sourceTracks.map((track) => {
+        const clone = cloneTrack(track)
+
+        return {
+          ...clone,
+          id: crypto.randomUUID(),
+          keyframes: clone.keyframes.map((keyframe) => ({
+            ...keyframe,
+            id: crypto.randomUUID(),
+          })),
+          layerId: targetLayerId,
+        }
+      })
+
+      return { tracks: [...state.tracks, ...duplicatedTracks] }
+    })
+  },
+
   clearLayerTracks: (layerId) => {
     set((state) => {
       const nextTracks = state.tracks.filter((track) => track.layerId !== layerId)
@@ -958,13 +984,17 @@ export const useTimelineStore = create<TimelineStore>((set, get) => ({
           return false
         }
 
-        if (track.binding.kind === "layer") {
+        if (layer.unavailableLayer || track.binding.kind === "layer") {
+          return true
+        }
+
+        if (isMaskParamKey(track.binding.key)) {
           return true
         }
 
         const definition = getParameterDefinition(getLayerDefinition(layer.type).params, track.binding.key)
 
-        return Boolean(definition && isAnimatableValueType(definition.type))
+        return Boolean(definition && getAnimatableValueType(definition))
       })
 
       return {
@@ -987,7 +1017,6 @@ export const useTimelineStore = create<TimelineStore>((set, get) => ({
   },
 
   replaceState: (nextState) => {
-    // Migrate legacy track-level interpolation to per-keyframe easing
     const migratedTracks = cloneTracks(nextState.tracks).map(migrateTrackEasing)
     const nextSelection = sanitizeSelectionState(migratedTracks, {
       selectedKeyframeId: nextState.selectedKeyframeId,

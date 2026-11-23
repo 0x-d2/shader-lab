@@ -36,7 +36,11 @@ bun add @basementstudio/shader-lab three
 - Composition texture output is canvas-backed and can be consumed by WebGL or WebGPU host scenes
 - Postprocessing must run on the same `WebGPURenderer` as the scene texture you pass in
 
-Supported effect layers include ASCII, CRT, directional blur, dithering, halftone, ink, particle grid, pattern, pixelation, pixel sorting, posterize, slice, edge detect, displacement map, and chromatic aberration.
+Supported effect layers include ASCII, blob tracking, CRT, directional blur, dithering, halftone, ink, particle grid, pattern, pixelation, pixel sorting, posterize, slice, edge detect, displacement map, and chromatic aberration.
+
+The blob-tracking layer detects moving (or bright) regions of the content below and frames them with CCTV-style shapes, labels, connecting lines, and trails. One inner effect can render inside the detected regions via `params.innerEffectType` (any pass-backed effect type) and `params.innerEffectParams` (a JSON string of that effect's parameter overrides; see the `ShaderLabBlobInnerEffect` type).
+
+`params.outputMode` selects what the layer emits: `"decorated"` draws the shapes and decorations; `"mask"` emits white-on-black blob fills for use with `compositeMode: "mask"`; `"motion"` emits a full-detail motion mask, or — when an inner effect is set — that effect carried by the mask's alpha, so it appears only where the frame is moving and is transparent elsewhere. Motion detection is tuned by `params.motionThreshold` (blob detection) and `params.motionMaskThreshold` / `params.motionPersistence` (the mask's threshold and trail decay). Note that `params.sensitivity` reads high-is-more-sensitive; project files below version 5 are migrated automatically.
 
 ## API Overview
 
@@ -90,10 +94,20 @@ Handle runtime errors:
 <ShaderLabComposition
   config={config}
   onRuntimeError={(message) => {
-    console.error(message)
+    if (message) {
+      console.error(message)
+    } else {
+      console.info("Shader Lab runtime error resolved.")
+    }
   }}
 />
 ```
+
+`onRuntimeError` is called with a string message when a runtime error occurs
+(renderer initialization failure, shader compilation error, missing WebGPU
+support). After an error has been reported, it is called once with `null` when
+the error is resolved so error UIs can recover. It is never called with `null`
+before an error has been reported.
 
 ## 2. Use a Composition as a Texture
 
@@ -655,3 +669,4 @@ export const sketch = Fn(() => {
 
 - Website: [basement.studio](https://basement.studio/)
 - npm: [@basementstudio/shader-lab](https://www.npmjs.com/package/@basementstudio/shader-lab)
+- Author: [Tobi Moccagatta](https://github.com/git-chad)

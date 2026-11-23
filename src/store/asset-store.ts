@@ -1,6 +1,20 @@
 import { create } from "zustand"
-import { isSvgFileName } from "@/lib/editor/media-file"
+import {
+  forgetStoredAssets,
+  persistAssetBlob,
+} from "@/lib/editor/autosave/assets"
+import {
+  inferFileAssetKind,
+  isAudioFileName,
+  isSvgMediaSource,
+  normalizeAssetMimeType,
+} from "@/lib/editor/media-file"
 import type { AssetKind, EditorAsset } from "@/types/editor"
+import {
+  MODEL_ANIMATION_AUTO,
+  modelSelectionDuration,
+  parseGltfClips,
+} from "@/lib/editor/model-animation"
 
 export interface AssetStoreState {
   assets: EditorAsset[]
@@ -8,7 +22,10 @@ export interface AssetStoreState {
 
 export interface AssetStoreActions {
   getAssetById: (id: string) => EditorAsset | null
-  loadAsset: (file: File) => Promise<EditorAsset>
+  loadAsset: (
+    file: File,
+    options?: { kind?: AssetKind }
+  ) => Promise<EditorAsset>
   removeAsset: (id: string) => void
   replaceAssets: (assets: EditorAsset[]) => void
 }
@@ -26,62 +43,51 @@ const ACCEPTED_TYPES = new Set([
   "video/quicktime",
   "model/gltf-binary",
   "model/gltf+json",
-  "model/obj",
+  "image/vnd.radiance",
   "application/octet-stream",
+  "audio/mpeg",
+  "audio/mp3",
+  "audio/mp4",
+  "audio/wav",
+  "audio/x-wav",
+  "audio/wave",
+  "audio/aac",
+  "audio/flac",
+  "audio/x-flac",
+  "audio/ogg",
+  "audio/opus",
+  "audio/webm",
 ])
 
 const MAX_SIZE_BYTES = 100 * 1024 * 1024
 
-function inferAssetKind(file: File): AssetKind | null {
-  const mimeType = file.type.toLowerCase()
+function validateFile(file: File, requested?: AssetKind): AssetKind {
+  const inferred = inferFileAssetKind(file)
+  const kind =
+    requested === "model" && inferred === "image" && isSvgMediaSource({ fileName: file.name, mimeType: file.type })
+      ? "model"
+      : inferred
+  const mimeType = normalizeAssetMimeType({ fileName: file.name, mimeType: file.type })
   const fileName = file.name.toLowerCase()
-
-  if (mimeType.startsWith("image/") || isSvgFileName(fileName)) {
-    return "image"
-  }
-
-  if (mimeType.startsWith("video/")) {
-    return "video"
-  }
-
-  if (fileName.endsWith(".mov")) {
-    return "video"
-  }
-
-  if (
-    fileName.endsWith(".glb") ||
-    fileName.endsWith(".gltf") ||
-    fileName.endsWith(".obj") ||
-    mimeType === "model/gltf-binary" ||
-    mimeType === "model/gltf+json" ||
-    mimeType === "model/obj"
-  ) {
-    return "model"
-  }
-
-  return null
-}
-
-function validateFile(file: File): AssetKind {
-  const kind = inferAssetKind(file)
-  const mimeType = file.type.toLowerCase()
 
   if (
     !kind ||
     (!(
       ACCEPTED_TYPES.has(mimeType) ||
-      (kind === "video" && file.name.toLowerCase().endsWith(".mov"))
+      (kind === "video" && fileName.endsWith(".mov")) ||
+      (kind === "audio" && isAudioFileName(fileName))
     ) &&
-      kind !== "model")
+      kind !== "model" &&
+      kind !== "environment")
   ) {
     throw new Error(
-      `Unsupported file type "${file.type || "unknown"}". Accepted: PNG, JPG, WebP, GIF, SVG, MP4, WebM, MOV, GLB, GLTF, OBJ.`
+      `Unsupported file type "${file.type || "unknown"}". Accepted: PNG, JPG, WebP, GIF, SVG, MP4, WebM, MOV, GLB, GLTF, HDR, MP3, WAV, M4A, FLAC, OGG.`
     )
   }
 
   if (file.size > MAX_SIZE_BYTES) {
     throw new Error(
-      `File is too large (${(file.size / 1024 / 1024).toFixed(1)} MB). Maximum size is 100 MB.`
+      `File is too large (${(file.size / 1024 / 1024).toFixed(1)} MB). Maximum size is ${MAX_SIZE_BYTES / 1024 / 1024} MB.`
     )
   }
 
@@ -132,11 +138,46 @@ function loadVideoMetadata(
   })
 }
 
+function loadAudioMetadata(url: string): Promise<{ duration: number }> {
+  return new Promise((resolve, reject) => {
+    const audio = document.createElement("audio")
+    audio.preload = "metadata"
+
+    const settle = (duration: number) => {
+      audio.ondurationchange = null
+      audio.onloadedmetadata = null
+      audio.onerror = null
+      resolve({ duration: Number.isFinite(duration) ? duration : 0 })
+    }
+
+    audio.onloadedmetadata = () => {
+      if (Number.isFinite(audio.duration)) {
+        settle(audio.duration)
+        return
+      }
+
+      audio.ondurationchange = () => {
+        if (Number.isFinite(audio.duration)) {
+          settle(audio.duration)
+        }
+      }
+
+      audio.currentTime = Number.MAX_SAFE_INTEGER
+    }
+
+    audio.onerror = () => {
+      reject(new Error("Failed to read audio metadata."))
+    }
+
+    audio.src = url
+  })
+}
+
 export const useAssetStore = create<AssetStore>((set, get) => ({
   assets: [],
 
-  async loadAsset(file) {
-    const kind = validateFile(file)
+  async loadAsset(file, options) {
+    const kind = validateFile(file, options?.kind)
     const url = URL.createObjectURL(file)
     const baseAsset = {
       createdAt: new Date().toISOString(),
@@ -144,8 +185,9 @@ export const useAssetStore = create<AssetStore>((set, get) => ({
       fileName: file.name,
       id: crypto.randomUUID(),
       kind,
-      mimeType: file.type,
+      mimeType: normalizeAssetMimeType({ fileName: file.name, mimeType: file.type }),
       sizeBytes: file.size,
+      source: "local" as const,
       status: "ready" as const,
       url,
     }
@@ -170,6 +212,25 @@ export const useAssetStore = create<AssetStore>((set, get) => ({
         height: metadata.height,
         width: metadata.width,
       }
+    } else if (kind === "model") {
+      const clips = parseGltfClips(await file.arrayBuffer())
+      const duration = modelSelectionDuration(MODEL_ANIMATION_AUTO, clips)
+
+      asset = {
+        ...baseAsset,
+        duration: duration > 0 ? duration : null,
+        height: null,
+        width: null,
+      }
+    } else if (kind === "audio") {
+      const metadata = await loadAudioMetadata(url)
+
+      asset = {
+        ...baseAsset,
+        duration: metadata.duration,
+        height: null,
+        width: null,
+      }
     } else {
       asset = {
         ...baseAsset,
@@ -178,6 +239,8 @@ export const useAssetStore = create<AssetStore>((set, get) => ({
         width: null,
       }
     }
+
+    await persistAssetBlob(asset, file)
 
     set((state) => ({
       assets: [...state.assets, asset],
@@ -189,9 +252,11 @@ export const useAssetStore = create<AssetStore>((set, get) => ({
   removeAsset: (id) => {
     const asset = get().assets.find((entry) => entry.id === id)
 
-    if (asset) {
+    if (asset?.source === "local") {
       URL.revokeObjectURL(asset.url)
     }
+
+    void forgetStoredAssets([id])
 
     set((state) => ({
       assets: state.assets.filter((entry) => entry.id !== id),
@@ -203,6 +268,14 @@ export const useAssetStore = create<AssetStore>((set, get) => ({
   },
 
   replaceAssets: (assets) => {
+    const retained = new Set(assets.map((asset) => asset.url))
+
+    for (const asset of get().assets) {
+      if (asset.source === "local" && !retained.has(asset.url)) {
+        URL.revokeObjectURL(asset.url)
+      }
+    }
+
     set({
       assets: [...assets],
     })

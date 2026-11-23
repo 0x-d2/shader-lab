@@ -2,12 +2,17 @@ declare module "three/webgpu" {
   export * from "three"
 
   import type {
+    Box3,
     Camera,
+    Color,
     ColorRepresentation,
     Material,
+    MeshPhysicalMaterial,
     Scene,
+    ShadowMaterial,
     Texture,
     TypedArray,
+    Vector3,
     WebGLRendererParameters,
     WebGLRenderTarget,
   } from "three"
@@ -17,6 +22,22 @@ declare module "three/webgpu" {
     colorNode: TSLNode | null
     opacityNode: TSLNode | null
     positionNode: TSLNode | null
+  }
+
+  export class MeshPhysicalNodeMaterial extends MeshPhysicalMaterial {
+    backdropAlphaNode: TSLNode | null
+    backdropNode: TSLNode | null
+    colorNode: TSLNode | null
+    iridescenceThicknessNode: TSLNode | null
+    metalnessNode: TSLNode | null
+    normalNode: TSLNode | null
+    opacityNode: TSLNode | null
+    positionNode: TSLNode | null
+    roughnessNode: TSLNode | null
+  }
+
+  export class ShadowNodeMaterial extends ShadowMaterial {
+    colorNode: TSLNode | null
   }
 
   export class PointsNodeMaterial extends Material {
@@ -45,6 +66,16 @@ declare module "three/webgpu" {
     // biome-ignore lint/suspicious/noExplicitAny: compute node type from Fn().compute() is opaque
     computeAsync(computeNodes: any): Promise<void>
     clear(): void
+    getClearAlpha(): number
+    getClearColor(target: Color): Color
+    copyTextureToTexture(
+      srcTexture: Texture,
+      dstTexture: Texture,
+      srcRegion?: Box3 | null,
+      dstPosition?: Vector3 | null,
+      srcLevel?: number,
+      dstLevel?: number
+    ): void
     dispose(): void
     init(): Promise<void>
     readRenderTargetPixelsAsync(

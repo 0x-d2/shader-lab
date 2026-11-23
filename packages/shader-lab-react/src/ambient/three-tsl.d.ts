@@ -1,7 +1,8 @@
 declare module "three/tsl" {
   export interface LoopConfig {
+    name?: string
     condition?: string
-    end: number
+    end: number | TSLNode
     start: number
     type: "float" | "int"
   }
@@ -20,6 +21,12 @@ declare module "three/tsl" {
     params: ShaderNodeParams,
     ...rest: unknown[]
   ) => unknown
+
+  export interface LoopInputs {
+    i: TSLNode
+    j: TSLNode
+    k: TSLNode
+  }
 
   export interface TSLNode {
     a: TSLNode
@@ -60,8 +67,10 @@ declare module "three/tsl" {
     assign(value: unknown): TSLNode
     clamp(min?: unknown, max?: unknown): TSLNode
     div(value: unknown): TSLNode
+    element(index: unknown): TSLNode
     equal(value: unknown): TSLNode
     fract(): TSLNode
+    floor(): TSLNode
     length(): TSLNode
     greaterThan(value: unknown): TSLNode
     greaterThanEqual(value: unknown): TSLNode
@@ -71,7 +80,11 @@ declare module "three/tsl" {
     mul(value: unknown): TSLNode
     mulAssign(value: unknown): TSLNode
     negate(): TSLNode
+    level(value: unknown): TSLNode
+    grad(gradX: unknown, gradY: unknown): TSLNode
+    load(uv: unknown): TSLNode
     normalize(): TSLNode
+    sample(uv: unknown): TSLNode
     sqrt(): TSLNode
     sub(value: unknown): TSLNode
     toVar(): TSLNode
@@ -86,23 +99,41 @@ declare module "three/tsl" {
   export const PI: TSLNode
   export function abs(value: unknown): TSLNode
   export function add(left: unknown, right: unknown): TSLNode
-  export function atan(value: unknown): TSLNode
+  export function atan(value: unknown, x?: unknown): TSLNode
   export function clamp(value: unknown, min?: unknown, max?: unknown): TSLNode
   export function cos(value: unknown): TSLNode
   export function cross(left: unknown, right: unknown): TSLNode
   export function div(left: unknown, right: unknown): TSLNode
   export function dot(left: unknown, right: unknown): TSLNode
-  // biome-ignore lint/suspicious/noExplicitAny: TSL Fn accepts both positional and destructured params
+  export interface ShaderFunction {
+    (...args: unknown[]): TSLNode & { compute(count: number): unknown }
+    setLayout(layout: {
+      name: string
+      type: string
+      inputs: { name: string; type: string }[]
+    }): ShaderFunction
+  }
+  export interface ConditionalNode extends TSLNode {
+    Else(callback: () => unknown): ConditionalNode
+  }
   export function Fn(
     fn: ShaderNodeFn | ((...args: never[]) => unknown),
     layout?: unknown
-  ): (...args: unknown[]) => TSLNode & { compute(count: number): unknown }
+  ): ShaderFunction
   export function Loop(
-    config: LoopConfig,
-    callback: (...args: unknown[]) => unknown
+    config: LoopConfig | TSLNode | number,
+    callback: (inputs: LoopInputs) => unknown
   ): TSLNode
   export function exp(value: unknown): TSLNode
+  export function dFdx(value: unknown): TSLNode
+  export function dFdy(value: unknown): TSLNode
   export function fract(value: unknown): TSLNode
+  export function log2(value: unknown): TSLNode
+  export function If(
+    condition: TSLNode,
+    callback: () => unknown
+  ): ConditionalNode
+  export function int(value?: unknown): TSLNode
   export function float(value?: unknown): TSLNode
   export function floor(value: unknown): TSLNode
   export function mat2(
@@ -141,7 +172,8 @@ declare module "three/tsl" {
     uv: unknown,
     value: unknown
   ): TSLNode & { toWriteOnly(): TSLNode }
-  export function uniform(value?: unknown): TSLNode
+  export function uniform(value?: unknown, nodeType?: string): TSLNode
+  export function uniformArray(values: unknown[], nodeType?: string): TSLNode
   export function uv(): TSLNode
   export function uvec2(x?: unknown, y?: unknown): TSLNode
   export function vec2(x?: unknown, y?: unknown): TSLNode

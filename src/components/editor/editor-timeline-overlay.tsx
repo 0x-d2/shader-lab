@@ -1,6 +1,10 @@
 "use client"
 
 import {
+  getMaskParameterDefinitions,
+  isMaskParamKey,
+} from "@/lib/editor/mask-animation"
+import {
   CaretDownIcon,
   CaretUpIcon,
   CircleIcon,
@@ -22,18 +26,28 @@ import {
   useRef,
   useState,
 } from "react"
+import { AudioMeterIcon } from "@/components/editor/audio-link-button"
+import { AudioSourceControl } from "@/components/editor/audio-source-control"
+import { AudioEnvelopeBackdrop } from "@/components/editor/timeline/audio-envelope-backdrop"
 import { CurveEditorPopover } from "@/components/editor/curve-editor"
 import { FloatingDesktopPanel } from "@/components/editor/floating-desktop-panel"
 import { GlassPanel } from "@/components/ui/glass-panel"
 import { IconButton } from "@/components/ui/icon-button"
 import { NumberInput } from "@/components/ui/number-input"
 import { Typography } from "@/components/ui/typography"
+import { useAudioMonitor } from "@/hooks/use-audio-monitor"
 import { cn } from "@/lib/cn"
 import type { KeyframeEasing } from "@/lib/easing-curve"
 import { LINEAR_EASING } from "@/lib/easing-curve"
 import { getLayerDefinition } from "@/lib/editor/config/layer-registry"
-import { getLongestVideoLayerDuration } from "@/lib/editor/timeline-duration"
-import { useEditorStore, useLayerStore, useTimelineStore } from "@/store"
+import { findAudioLink } from "@/lib/editor/audio/links"
+import { isEditableTarget } from "@/lib/editor/is-editable-target"
+import {
+  getLongestVideoLayerDuration,
+  MAX_DURATION,
+  MIN_DURATION,
+} from "@/lib/editor/timeline-duration"
+import { useAudioStore, useEditorStore, useLayerStore, useSoundStore, useTimelineStore } from "@/store"
 import { useAssetStore } from "@/store/asset-store"
 import { isParamVisible } from "./properties-sidebar-utils"
 import {
@@ -43,6 +57,7 @@ import {
 } from "@/store/timeline-store"
 import type {
   AnimatedPropertyBinding,
+  AudioLink,
   EditorLayer,
   ParameterDefinition,
   TimelineKeyframe,
@@ -50,6 +65,7 @@ import type {
 } from "@/types/editor"
 
 type TimelinePropertyItem = {
+  audioLink: AudioLink | null
   binding: AnimatedPropertyBinding
   color: string
   id: string
@@ -98,7 +114,7 @@ const GENERAL_TIMELINE_PROPERTIES = [
 ] as const
 
 const COLLAPSED_SHELL_HEIGHT = 46
-const COLLAPSED_SHELL_WIDTH = 580
+const COLLAPSED_SHELL_WIDTH = 660
 const EXPANDED_SHELL_HEIGHT = 380
 const EXPANDED_SHELL_WIDTH = 820
 const SMALL_NUDGE_TIME = 1 / 60
@@ -133,9 +149,17 @@ function rectsIntersect(left: ClientSelectionRect, right: DOMRect): boolean {
   )
 }
 
-function formatSeconds(value: number): string {
-  const safeValue = Number.isFinite(value) ? value : 0
-  return `${safeValue.toFixed(2)}s`
+function formatSeconds(value: number, scaleSeconds = value): string {
+  const safeValue = Number.isFinite(value) ? Math.max(0, value) : 0
+
+  if (!(Number.isFinite(scaleSeconds) && scaleSeconds >= 60)) {
+    return `${safeValue.toFixed(2)}s`
+  }
+
+  const minutes = Math.floor(safeValue / 60)
+  const seconds = safeValue - minutes * 60
+
+  return `${minutes}:${seconds.toFixed(2).padStart(5, "0")}`
 }
 
 function hexToRgbChannels(value: string): string {
@@ -152,18 +176,6 @@ function hexToRgbChannels(value: string): string {
   return `${red} ${green} ${blue}`
 }
 
-function isEditableTarget(target: EventTarget | null): boolean {
-  if (!(target instanceof HTMLElement)) {
-    return false
-  }
-
-  if (target.isContentEditable) {
-    return true
-  }
-
-  return ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName)
-}
-
 function getPropertyId(binding: AnimatedPropertyBinding): string {
   if (binding.kind === "layer") {
     return `layer:${binding.property}`
@@ -175,14 +187,27 @@ function getPropertyId(binding: AnimatedPropertyBinding): string {
 function getVisibleParams(layer: EditorLayer): ParameterDefinition[] {
   const definition = getLayerDefinition(layer.type)
 
-  return definition.params.filter((entry) =>
-    isParamVisible(entry, layer.params, [...definition.params], layer.type)
+  return definition.params.filter(
+    (entry) =>
+      (entry.type === "text" && entry.interpolate === "gradient") ||
+      isParamVisible(entry, layer.params, [...definition.params], layer.type)
   )
+}
+
+function propertyColor(definition: ParameterDefinition): string {
+  if (isMaskParamKey(definition.key)) {
+    return "#7FD1AE"
+  }
+
+  return definition.type === "color" || definition.type === "text"
+    ? "#FF8CAB"
+    : "#FF4D00"
 }
 
 function buildTimelineProperties(
   layer: EditorLayer | null,
-  tracks: TimelineTrack[]
+  tracks: TimelineTrack[],
+  audioLinks: AudioLink[]
 ): TimelinePropertyItem[] {
   if (!layer) {
     return []
@@ -194,6 +219,7 @@ function buildTimelineProperties(
       const id = getPropertyId(binding)
 
       return {
+        audioLink: findAudioLink(audioLinks, layer.id, binding),
         binding,
         color: entry.color,
         id,
@@ -208,7 +234,12 @@ function buildTimelineProperties(
     }
   )
 
-  for (const definition of getVisibleParams(layer)) {
+  const maskDefinitions =
+    layer.mask?.enabled && layer.mask.shape !== "none"
+      ? getMaskParameterDefinitions(layer.mask.shape)
+      : []
+
+  for (const definition of [...getVisibleParams(layer), ...maskDefinitions]) {
     const binding = createParamBinding(layer, definition.key)
 
     if (!binding) {
@@ -217,8 +248,9 @@ function buildTimelineProperties(
 
     const id = getPropertyId(binding)
     properties.push({
+      audioLink: findAudioLink(audioLinks, layer.id, binding),
       binding,
-      color: definition.type === "color" ? "#FF8CAB" : "#B697FF",
+      color: propertyColor(definition),
       id,
       kind: "param",
       label: definition.label,
@@ -250,7 +282,36 @@ function getMajorTickStep(duration: number): number {
     return 10
   }
 
-  return 20
+  if (duration <= 120) {
+    return 20
+  }
+
+  if (duration <= 300) {
+    return 30
+  }
+
+  if (duration <= 600) {
+    return 60
+  }
+
+  if (duration <= 1200) {
+    return 120
+  }
+
+  return 300
+}
+
+function formatTickLabel(tick: number, duration: number): string {
+  if (duration <= 60) {
+    return tick.toFixed(1)
+  }
+
+  const minutes = Math.floor(tick / 60)
+  const seconds = Math.round(tick % 60)
+
+  return seconds === 60
+    ? `${minutes + 1}:00`
+    : `${minutes}:${seconds.toString().padStart(2, "0")}`
 }
 
 function createTickPositions(duration: number) {
@@ -268,7 +329,9 @@ function createTickPositions(duration: number) {
     majorTicks.push(Number(current.toFixed(3)))
   }
 
-  if (majorTicks[majorTicks.length - 1] !== safeDuration) {
+  const lastTick = majorTicks[majorTicks.length - 1] ?? 0
+
+  if (safeDuration - lastTick > majorStep / 2) {
     majorTicks.push(safeDuration)
   }
 
@@ -290,29 +353,31 @@ function TimelineTransport({
   autoKey,
   currentTime,
   duration,
-  durationReadOnly,
   expanded,
   isPlaying,
   loop,
+  monitorEnabled,
   onDurationChange,
   onStop,
   onToggleAutoKey,
   onToggleExpanded,
   onToggleLoop,
+  onToggleMonitor,
   onTogglePlaying,
 }: {
   autoKey: boolean
   currentTime: number
   duration: number
-  durationReadOnly: boolean
   expanded: boolean
   isPlaying: boolean
   loop: boolean
+  monitorEnabled: boolean
   onDurationChange: (value: number) => void
   onStop: () => void
   onToggleAutoKey: () => void
   onToggleExpanded: () => void
   onToggleLoop: () => void
+  onToggleMonitor: () => void
   onTogglePlaying: () => void
 }) {
   return (
@@ -346,14 +411,12 @@ function TimelineTransport({
           <StopIcon height={14} width={14} />
         </IconButton>
         <IconButton
-          aria-label={loop ? "Disable loop" : "Enable loop"}
-          className={cn(
-            "h-7 w-7",
-            loop && "bg-white/12 text-[var(--ds-color-text-primary)]"
-          )}
+          aria-label="Loop playback"
+          className="h-7 w-7"
           onClick={onToggleLoop}
+          selected={loop}
+          tooltip={loop ? "Disable loop" : "Enable loop"}
           uiSound={loop ? "action.loopOff" : "action.loopOn"}
-          variant={loop ? "active" : "default"}
         >
           <LoopIcon height={14} width={14} />
         </IconButton>
@@ -366,14 +429,12 @@ function TimelineTransport({
 
       <div className="inline-flex items-center gap-1">
         <IconButton
-          aria-label={autoKey ? "Disable auto-key" : "Enable auto-key"}
-          className={cn(
-            "h-7 w-auto gap-1.5 px-[10px]",
-            autoKey && "bg-white/12 text-[var(--ds-color-text-primary)]"
-          )}
+          aria-label="Auto-key"
+          className="h-7 w-auto gap-1.5 px-[10px]"
           onClick={onToggleAutoKey}
+          selected={autoKey}
+          tooltip={autoKey ? "Disable auto-key" : "Enable auto-key"}
           uiSound={autoKey ? "action.autoKeyOff" : "action.autoKeyOn"}
-          variant={autoKey ? "active" : "default"}
         >
           {autoKey ? (
             <DotFilledIcon height={10} width={10} />
@@ -391,29 +452,35 @@ function TimelineTransport({
         className="block h-4 w-px shrink-0 rounded-full bg-[var(--ds-border-divider)]"
       />
 
+      <AudioSourceControl
+        monitorEnabled={monitorEnabled}
+        onToggleMonitor={onToggleMonitor}
+      />
+
+      <span
+        aria-hidden="true"
+        className="block h-4 w-px shrink-0 rounded-full bg-[var(--ds-border-divider)]"
+      />
+
       <div className="inline-flex items-center gap-2">
         <Typography as="span" tone="secondary" variant="caption">
           Dur
         </Typography>
         <NumberInput
           aria-label="Timeline duration in seconds"
-          size={2}
-          className={cn(
-            "min-h-7 appearance-none rounded-[var(--ds-radius-icon)] border border-[var(--ds-border-divider)] bg-[var(--ds-color-surface-control)] px-[10px] text-center font-[var(--ds-font-mono)] text-[12px] leading-4 text-[var(--ds-color-text-primary)] outline-none transition-[background-color,border-color] duration-160 ease-[var(--ease-out-cubic)] focus:border-[var(--ds-border-hover)]",
-            durationReadOnly && "cursor-not-allowed text-white/55 opacity-60"
-          )}
-          disabled={durationReadOnly}
+          size={5}
+          className="min-h-7 appearance-none rounded-[var(--ds-radius-icon)] border border-[var(--ds-border-divider)] bg-[var(--ds-color-surface-control)] px-[10px] text-center font-[var(--ds-font-mono)] text-[12px] leading-4 text-[var(--ds-color-text-primary)] outline-none transition-[background-color,border-color] duration-160 ease-[var(--ease-out-cubic)] focus:border-[var(--ds-border-hover)]"
           formatValue={(value) =>
-            durationReadOnly ? value.toFixed(2) : Math.trunc(value).toString()
+            Number.isInteger(value) ? value.toString() : value.toFixed(1)
           }
-          max={120}
-          min={1}
+          max={MAX_DURATION}
+          min={MIN_DURATION}
           onChange={onDurationChange}
           parseValue={(value) => {
             const nextValue = Number.parseFloat(
               value.trim().replaceAll(",", ".")
             )
-            return Number.isFinite(nextValue) ? Math.trunc(nextValue) : null
+            return Number.isFinite(nextValue) ? nextValue : null
           }}
           step={1}
           value={duration}
@@ -428,14 +495,14 @@ function TimelineTransport({
         </Typography>
       </div>
 
-      <div className="inline-flex min-w-0 flex-1 items-center justify-end gap-1">
+      <div className="inline-flex min-w-0 flex-1 items-center justify-end gap-2">
         <Typography
           as="span"
-          className="min-w-[104px] whitespace-nowrap text-right text-[12px]"
+          className="min-w-[136px] shrink-0 whitespace-nowrap text-right text-[12px]"
           tone="secondary"
           variant="monoMd"
         >
-          {formatSeconds(currentTime)} / {formatSeconds(duration)}
+          {formatSeconds(currentTime, duration)} / {formatSeconds(duration)}
         </Typography>
         <IconButton
           aria-label={
@@ -524,6 +591,8 @@ export function EditorTimelineOverlay() {
     (state) => state.selectedKeyframeIds
   )
   const tracks = useTimelineStore((state) => state.tracks)
+  const audioLinks = useAudioStore((state) => state.links)
+  const setLinkEnabled = useAudioStore((state) => state.setLinkEnabled)
   const addSelectedKeyframes = useTimelineStore(
     (state) => state.addSelectedKeyframes
   )
@@ -550,12 +619,14 @@ export function EditorTimelineOverlay() {
     (state) => state.toggleSelectedKeyframes
   )
   const togglePlaying = useTimelineStore((state) => state.togglePlaying)
-  const derivedVideoDuration = useMemo(
-    () => getLongestVideoLayerDuration(layers, assets),
+  const hasVideoLayer = useMemo(
+    () => getLongestVideoLayerDuration(layers, assets) !== null,
     [assets, layers]
   )
-  const hasDerivedVideoDuration = derivedVideoDuration !== null
-  const effectiveDuration = derivedVideoDuration ?? duration
+
+  const audioEnabled = useSoundStore((state) => state.enabled)
+  const toggleAudioEnabled = useSoundStore((state) => state.toggleEnabled)
+  useAudioMonitor(audioEnabled)
 
   const layerTracks = useMemo(
     () =>
@@ -565,25 +636,25 @@ export function EditorTimelineOverlay() {
     [selectedLayer, tracks]
   )
   const properties = useMemo(
-    () => buildTimelineProperties(selectedLayer, tracks),
-    [selectedLayer, tracks]
+    () => buildTimelineProperties(selectedLayer, tracks, audioLinks),
+    [audioLinks, selectedLayer, tracks]
   )
   const animatedProperties = useMemo(
-    () => properties.filter((entry) => entry.track),
+    () => properties.filter((entry) => entry.track ?? entry.audioLink),
     [properties]
   )
   const [focusedPropertyId, setFocusedPropertyId] = useState<string | null>(
     null
   )
-  const previousHasDerivedVideoDurationRef = useRef<boolean | null>(null)
+  const previousHasVideoLayerRef = useRef<boolean | null>(null)
   const scrubSurfaceRef = useRef<HTMLDivElement | null>(null)
   const trackCanvasRef = useRef<HTMLDivElement | null>(null)
   const keyframeButtonRefs = useRef(new Map<string, HTMLButtonElement>())
   const [dragState, setDragState] = useState<DragState | null>(null)
   const [viewportSize, setViewportSize] = useState({ height: 900, width: 1440 })
   const tickPositions = useMemo(
-    () => createTickPositions(effectiveDuration),
-    [effectiveDuration]
+    () => createTickPositions(duration),
+    [duration]
   )
   const selectedKeyframeIdSet = useMemo(
     () => new Set(selectedKeyframeIds),
@@ -634,27 +705,14 @@ export function EditorTimelineOverlay() {
   )
 
   useEffect(() => {
-    if (!(hasDerivedVideoDuration && derivedVideoDuration !== duration)) {
-      return
-    }
+    const previousHasVideoLayer = previousHasVideoLayerRef.current
 
-    setDuration(derivedVideoDuration)
-  }, [derivedVideoDuration, duration, hasDerivedVideoDuration, setDuration])
-
-  useEffect(() => {
-    const previousHasDerivedVideoDuration =
-      previousHasDerivedVideoDurationRef.current
-
-    if (
-      hasDerivedVideoDuration &&
-      previousHasDerivedVideoDuration !== true &&
-      !isPlaying
-    ) {
+    if (hasVideoLayer && previousHasVideoLayer !== true && !isPlaying) {
       setPlaying(true)
     }
 
-    previousHasDerivedVideoDurationRef.current = hasDerivedVideoDuration
-  }, [hasDerivedVideoDuration, isPlaying, setPlaying])
+    previousHasVideoLayerRef.current = hasVideoLayer
+  }, [hasVideoLayer, isPlaying, setPlaying])
 
   useEffect(() => {
     if (!(timelinePanelOpen && selectedLayer)) {
@@ -1084,7 +1142,7 @@ export function EditorTimelineOverlay() {
     const rect = surface.getBoundingClientRect()
     const progress =
       rect.width > 0 ? clamp((clientX - rect.left) / rect.width, 0, 1) : 0
-    return progress * effectiveDuration
+    return progress * duration
   })
 
   const handleDragMove = useEffectEvent((event: PointerEvent) => {
@@ -1153,7 +1211,7 @@ export function EditorTimelineOverlay() {
   const selectedTrack =
     layerTracks.find((track) => track.id === selectedTrackId) ?? null
   const progress =
-    effectiveDuration > 0 ? clamp(currentTime / effectiveDuration, 0, 1) : 0
+    duration > 0 ? clamp(currentTime / duration, 0, 1) : 0
   const shellWidth = timelinePanelOpen
     ? Math.min(EXPANDED_SHELL_WIDTH, Math.max(640, viewportSize.width - 96))
     : Math.min(COLLAPSED_SHELL_WIDTH, Math.max(360, viewportSize.width - 48))
@@ -1263,6 +1321,7 @@ export function EditorTimelineOverlay() {
               : { height: shellHeight, opacity: 1, width: shellWidth, y: 0 }
           }
           className="pointer-events-auto max-h-[min(380px,calc(100vh-268px))] origin-bottom"
+          data-timeline-shell=""
           initial={false}
           transition={
             reduceMotion
@@ -1276,28 +1335,30 @@ export function EditorTimelineOverlay() {
           }
         >
           <GlassPanel
-            className="pointer-events-auto flex h-full max-h-inherit w-full flex-col overflow-hidden"
+            className="pointer-events-auto flex h-full max-h-inherit w-full flex-col overflow-hidden rounded-toolbar"
+            data-toolbar=""
             variant="panel"
           >
             <div
               className={cn(
-                "border-b border-[var(--ds-border-divider)] p-2 transition-[border-color] duration-160 ease-[var(--ease-out-cubic)]",
+                "border-b border-[var(--ds-border-divider)] p-bar transition-[border-color] duration-160 ease-[var(--ease-out-cubic)]",
                 !timelinePanelOpen && "border-b-transparent"
               )}
             >
               <TimelineTransport
                 autoKey={timelineAutoKey}
                 currentTime={currentTime}
-                duration={effectiveDuration}
-                durationReadOnly={hasDerivedVideoDuration}
+                duration={duration}
                 expanded={timelinePanelOpen}
                 isPlaying={isPlaying}
                 loop={loop}
+                monitorEnabled={audioEnabled}
                 onDurationChange={setDuration}
                 onStop={stop}
                 onToggleAutoKey={toggleTimelineAutoKey}
                 onToggleExpanded={toggleTimelinePanel}
                 onToggleLoop={() => setLoop(!loop)}
+                onToggleMonitor={toggleAudioEnabled}
                 onTogglePlaying={togglePlaying}
               />
             </div>
@@ -1339,22 +1400,26 @@ export function EditorTimelineOverlay() {
                       {properties.length > 0 ? (
                         properties.map((entry) => {
                           const track = entry.track
+                          const audioLink = entry.audioLink
                           const isFocused = focusedPropertyId === entry.id
-                          const hasTrack = Boolean(track)
-                          const trackEnabled = track?.enabled ?? true
+                          const isAnimated = Boolean(track ?? audioLink)
+                          const animationEnabled =
+                            (track?.enabled ?? false) ||
+                            (audioLink?.enabled ?? false)
 
                           return (
                             <div
                               className={cn(
                                 "flex min-h-8 items-center gap-1.5 rounded-[10px] border border-transparent px-1.5 transition-[background-color,border-color,color] duration-160 ease-[var(--ease-out-cubic)]",
-                                isFocused && "border-white/8 bg-white/8"
+                                isFocused &&
+                                  "border-[var(--ds-border-hover)] bg-[var(--ds-color-surface-active)]"
                               )}
                               key={entry.id}
                             >
                               <button
                                 className={cn(
                                   "flex min-h-8 min-w-0 flex-1 cursor-pointer items-center gap-[10px] rounded-[10px] border border-transparent px-[10px] text-left transition-[background-color,border-color,color,transform,opacity] duration-160 ease-[var(--ease-out-cubic)] hover:bg-white/4 hover:border-white/5 active:scale-[0.995]",
-                                  !trackEnabled && hasTrack && "opacity-60",
+                                  isAnimated && !animationEnabled && "opacity-60",
                                 )}
                                 onClick={() => {
                                   setFocusedPropertyId(entry.id)
@@ -1376,31 +1441,48 @@ export function EditorTimelineOverlay() {
                                   <Typography
                                     as="span"
                                     className="min-w-0"
-                                    tone={hasTrack ? "primary" : "secondary"}
+                                    tone={isAnimated ? "primary" : "secondary"}
                                     variant="caption"
                                   >
                                     {entry.label}
                                   </Typography>
+                                  {audioLink ? (
+                                    <span
+                                      aria-label="Driven by audio"
+                                      className="inline-flex shrink-0 text-[var(--ds-color-accent)] [&_svg]:h-2.5 [&_svg]:w-2.5"
+                                      role="img"
+                                      title="Driven by audio"
+                                    >
+                                      <AudioMeterIcon />
+                                    </span>
+                                  ) : null}
                                 </div>
                               </button>
 
-                              {track ? (
+                              {isAnimated ? (
                                 <IconButton
                                   aria-label={
-                                    track.enabled
+                                    animationEnabled
                                       ? `Disable ${entry.label} animation`
                                       : `Enable ${entry.label} animation`
                                   }
                                   className="h-7 w-7 shrink-0"
                                   onClick={(event) => {
                                     event.stopPropagation()
-                                    setTrackEnabled(track.id, !track.enabled)
+
+                                    if (track) {
+                                      setTrackEnabled(track.id, !animationEnabled)
+                                    }
+
+                                    if (audioLink) {
+                                      setLinkEnabled(audioLink.id, !animationEnabled)
+                                    }
                                   }}
-                                  tooltip={track.enabled ? "Disable track" : "Enable track"}
-                                  uiSound={track.enabled ? "action.visibilityOff" : "action.visibilityOn"}
+                                  tooltip={animationEnabled ? "Disable track" : "Enable track"}
+                                  uiSound={animationEnabled ? "action.visibilityOff" : "action.visibilityOn"}
                                   variant="ghost"
                                 >
-                                  {track.enabled ? (
+                                  {animationEnabled ? (
                                     <EyeOpenIcon height={14} width={14} />
                                   ) : (
                                     <EyeClosedIcon height={14} width={14} />
@@ -1429,10 +1511,10 @@ export function EditorTimelineOverlay() {
                     {tickPositions.minorTicks.map((tick) => (
                       <span
                         aria-hidden="true"
-                        className="absolute bottom-0 h-[10px] w-px bg-white/6"
+                        className="absolute bottom-0 h-[10px] w-px bg-[var(--ds-border-divider)]"
                         key={`minor-${tick}`}
                         style={{
-                          left: `${(tick / effectiveDuration) * 100}%`,
+                          left: `${(tick / duration) * 100}%`,
                         }}
                       />
                     ))}
@@ -1443,7 +1525,7 @@ export function EditorTimelineOverlay() {
                         className="absolute bottom-0 h-[18px] w-px bg-white/14"
                         key={`major-${tick}`}
                         style={{
-                          left: `${(tick / effectiveDuration) * 100}%`,
+                          left: `${(tick / duration) * 100}%`,
                         }}
                       />
                     ))}
@@ -1456,10 +1538,10 @@ export function EditorTimelineOverlay() {
                         tone="muted"
                         variant="monoXs"
                         style={{
-                          left: `${(tick / effectiveDuration) * 100}%`,
+                          left: `${(tick / duration) * 100}%`,
                         }}
                       >
-                        {tick.toFixed(1)}
+                        {formatTickLabel(tick, duration)}
                       </Typography>
                     ))}
                   </div>
@@ -1472,22 +1554,18 @@ export function EditorTimelineOverlay() {
                     {animatedProperties.length > 0 ? (
                       animatedProperties.map((entry) => {
                         const track = entry.track
-
-                        if (!track) {
-                          return null
-                        }
-
                         const isFocused = focusedPropertyId === entry.id
+                        const laneEnabled = track?.enabled ?? true
 
                         return (
                           <div
                             className={cn(
-                              "relative basis-[46px] border-b border-white/4 bg-[linear-gradient(90deg,rgb(255_255_255_/_0.02)_0%,rgb(255_255_255_/_0.015)_100%)] transition-opacity duration-160 ease-[var(--ease-out-cubic)]",
+                              "relative basis-[46px] border-b border-[var(--ds-border-divider)] bg-[linear-gradient(90deg,rgb(255_255_255_/_0.02)_0%,rgb(255_255_255_/_0.015)_100%)] transition-opacity duration-160 ease-[var(--ease-out-cubic)]",
                               isFocused &&
                                 "bg-[linear-gradient(90deg,rgb(var(--timeline-track-rgb,122_162_255)_/_0.12)_0%,rgb(var(--timeline-track-rgb,122_162_255)_/_0.03)_42%,rgb(255_255_255_/_0.02)_100%)]",
-                              !track.enabled && "opacity-55"
+                              !laneEnabled && "opacity-55"
                             )}
-                            key={track.id}
+                            key={entry.id}
                             style={
                               {
                                 "--timeline-track-rgb": hexToRgbChannels(
@@ -1496,13 +1574,20 @@ export function EditorTimelineOverlay() {
                               } as CSSProperties
                             }
                           >
+                            {entry.audioLink?.enabled ? (
+                              <AudioEnvelopeBackdrop
+                                bandId={entry.audioLink.band}
+                                durationSeconds={duration}
+                              />
+                            ) : null}
                             <div
                               className={cn(
                                 "absolute top-[22px] right-0 left-0 h-0.5 rounded-full bg-[rgb(var(--timeline-track-rgb,122_162_255)_/_0.18)]",
-                                !track.enabled && "opacity-40"
+                                !laneEnabled && "opacity-40"
                               )}
                             />
-                            {track.keyframes.map((keyframe) => {
+                            {track
+                              ? track.keyframes.map((keyframe) => {
                               const isSelected = selectedKeyframeIdSet.has(
                                 keyframe.id
                               )
@@ -1581,7 +1666,7 @@ export function EditorTimelineOverlay() {
                                     keyframeButtonRefs.current.delete(keyframe.id)
                                   }}
                                   style={{
-                                    left: `${(keyframe.time / effectiveDuration) * 100}%`,
+                                    left: `${(keyframe.time / duration) * 100}%`,
                                   }}
                                   type="button"
                                 >
@@ -1609,8 +1694,9 @@ export function EditorTimelineOverlay() {
                                     )}
                                   />
                                 </button>
-                              )
-                            })}
+                                  )
+                                })
+                              : null}
                           </div>
                         )
                       })
@@ -1622,7 +1708,8 @@ export function EditorTimelineOverlay() {
                             variant="caption"
                             className="text-balance"
                           >
-                            Add your first keyframe from the properties panel.
+                            Add a keyframe or link a parameter to audio from the
+                            properties panel.
                           </Typography>
                         </div>
                       </div>
@@ -1631,7 +1718,7 @@ export function EditorTimelineOverlay() {
                     {marqueeStyle ? (
                       <div
                         aria-hidden="true"
-                        className="pointer-events-none absolute z-2 rounded-[8px] border border-[#57A4FF] bg-[#57A4FF]/18 shadow-[inset_0_0_0_1px_rgb(255_255_255_/_0.06)]"
+                        className="pointer-events-none absolute z-2 rounded-[8px] border border-[var(--ds-color-accent)] bg-[var(--ds-color-accent-soft)] shadow-[inset_0_0_0_1px_rgb(255_255_255_/_0.06)]"
                         style={marqueeStyle}
                       />
                     ) : null}
